@@ -1,0 +1,27 @@
+# SwiftPM / build
+.build/
+.swiftpm/
+Package.resolved
+
+# Xcode / macOS
+DerivedData/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcuserstate
+*.dSYM/
+.DS_Store
+
+# Local agent state / internal memory
+.claude/
+CLAUDE.md
+**/CLAUDE.md
+
+# Logs / temporary files
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Local environment
+.env
+.env.*
