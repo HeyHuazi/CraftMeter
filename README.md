@@ -42,6 +42,12 @@ CraftMeter 是一个 **Tauri + React + Rust** 的本机 AI coding usage menubar 
 - **Gemini CLI / Qwen Code**：读取 assistant `usageMetadata`；`promptTokenCount` 扣除 `cachedContentTokenCount`，`thoughtsTokenCount` 进入 reasoning。
 - **Claude config / Skills**：`~/.claude.json` 用于识别 MCP server，`~/.claude/skills/` 用于识别全局 Skills。
 
+## 下载
+
+稳定版本放在 [GitHub Releases](https://github.com/HeyHuazi/CraftMeter/releases)。
+
+`.app`、`.dmg` 和安装包不提交到 Git 仓库；它们是 release assets。源码在 Git，产物在 Releases，这是唯一干净的边界。
+
 ## 安装与开发
 
 ### 环境
@@ -60,7 +66,7 @@ npm install
 ### 开发运行
 
 ```bash
-npm run tauri dev
+npm run tauri:dev
 ```
 
 ### 前端构建
@@ -72,13 +78,13 @@ npm run build
 ### Rust 测试
 
 ```bash
-cargo test --manifest-path src-tauri/Cargo.toml
+npm run test:rust
 ```
 
 ### 打包应用
 
 ```bash
-npm run tauri build
+npm run tauri:build
 ```
 
 macOS 产物通常位于：
@@ -89,6 +95,8 @@ src-tauri/target/release/bundle/dmg/*.dmg
 ```
 
 当前 `tauri.conf.json` 开启了 app/dmg/nsis targets；在 macOS 本机主要产出 `.app` 与 `.dmg`，Windows NSIS 产物取决于本机工具链支持。
+
+发布流程见 [docs/RELEASE.md](docs/RELEASE.md)。打 tag 后 GitHub Actions 会构建 macOS DMG 并上传到对应 GitHub Release。
 
 ## 项目结构
 
@@ -115,7 +123,9 @@ CraftMeter/
 │       ├── parser.rs         # RawEvent -> Dashboard aggregation
 │       ├── pricing.rs        # LiteLLM/models.dev price table cache
 │       └── config.rs         # MCP/Skill user config discovery
-├── docs/ARCHITECTURE.md      # architecture map
+├── docs/
+│   ├── ARCHITECTURE.md      # architecture map
+│   └── RELEASE.md           # release process and artifact policy
 ├── CONTRIBUTING.md           # contributor workflow
 ├── CHANGELOG.md              # release notes
 └── README.md

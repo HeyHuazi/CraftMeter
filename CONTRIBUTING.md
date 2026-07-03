@@ -13,18 +13,38 @@
 
 ```bash
 npm install
-npm run tauri dev
+npm run tauri:dev
 npm run build
-cargo test --manifest-path src-tauri/Cargo.toml
-npm run tauri build
+npm run test:rust
+npm run tauri:build
 ```
 
-`npm run tauri build` 的 macOS 产物通常在：
+`npm run tauri:build` 的 macOS 产物通常在：
 
 ```text
 src-tauri/target/release/bundle/macos/CraftMeter.app
 src-tauri/target/release/bundle/dmg/*.dmg
 ```
+
+## 发布流程
+
+二进制产物不进入 Git 历史。`.app`、`.dmg`、installer 和 archive 都放在 GitHub Releases。
+
+本地发布前验证：
+
+```bash
+npm run build
+npm run test:rust
+```
+
+创建正式 release：
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+GitHub Actions 的 `Release` workflow 会构建 macOS DMG、生成 `checksums.txt`，并上传到对应 GitHub Release。详细规则见 [docs/RELEASE.md](docs/RELEASE.md)。
 
 ## 架构边界
 

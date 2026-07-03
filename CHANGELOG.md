@@ -4,6 +4,7 @@ All notable changes to CraftMeter will be documented in this file.
 
 ## Unreleased
 
+- Added a GitHub Releases workflow for tagged macOS DMG builds and documented the release artifact policy.
 - Made **Tauri + React + Rust** the single active architecture for CraftMeter.
 - Removed the legacy SwiftPM implementation from the main tree; old Swift code remains in Git history.
 - Added Codex CLI ingestion from `~/.codex/sessions/**/*.jsonl` using `token_count.last_token_usage`.

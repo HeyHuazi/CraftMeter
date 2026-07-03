@@ -45,3 +45,15 @@ CLAUDE.md
 .DS_Store
 .history/
 claude-design-files/
+
+# Release artifacts stay in GitHub Releases, not Git history
+*.dmg
+*.app
+*.pkg
+*.msi
+*.exe
+*.AppImage
+*.deb
+*.rpm
+*.tar.gz
+*.zip
