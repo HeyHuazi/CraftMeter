@@ -1,15 +1,30 @@
-# SwiftPM / build
+# Node / Vite
+node_modules/
+dist/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/gen/
+**/*.rs.bk
+Cargo.lock.orig
+
+# Swift legacy build leftovers
 .build/
 .swiftpm/
 Package.resolved
-
-# Xcode / macOS
 DerivedData/
 *.xcodeproj/project.xcworkspace/xcuserdata/
 *.xcworkspace/xcuserdata/
 *.xcuserstate
 *.dSYM/
-.DS_Store
+
+# Generated local snapshots
+public/dev-dashboard.json
 
 # Local agent state / internal memory
 .claude/
@@ -25,3 +40,8 @@ CLAUDE.md
 # Local environment
 .env
 .env.*
+
+# macOS
+.DS_Store
+.history/
+claude-design-files/
