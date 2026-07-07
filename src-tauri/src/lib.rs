@@ -488,7 +488,7 @@ pub fn run() {
             let lh_tray = last_hidden.clone();
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(tauri::include_image!("icons/tray-icon.png"))
-                .icon_as_template(false)
+                .icon_as_template(true)
                 .title(&label)
                 .tooltip(format!("CraftMeter · today {}", label))
                 .menu(&menu)
