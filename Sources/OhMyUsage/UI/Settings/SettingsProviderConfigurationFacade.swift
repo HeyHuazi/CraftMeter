@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 AppViewModel 的 Provider 配置动作与 Relay 浏览器导入工作流结果
+ * [OUTPUT]: 对外提供设置 UI 可替换、可测试的 Provider 配置闭包门面
+ * [POS]: Settings 的动作隔离层；SwiftUI 表单不直接耦合 AppViewModel 具体实现
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import Foundation
 import OhMyUsageDomain
 
@@ -42,14 +48,17 @@ struct SettingsProviderConfigurationFacade {
             snapshotPreview: nil
         )
     }
-    var importRelayDraftFromBrowserHandler: (RelaySettingsDraft) async -> RelayDiagnosticResult = {
-        RelayDiagnosticResult(
-            success: false,
-            fetchHealth: .endpointMisconfigured,
-            resolvedAdapterID: $0.preferredAdapterID,
-            resolvedAuthSource: nil,
-            message: "",
-            snapshotPreview: nil
+    var importRelayDraftFromBrowserHandler: (RelaySettingsDraft) async -> RelayBrowserImportResult = {
+        RelayBrowserImportResult(
+            discovery: RelayBrowserImportDiscovery(
+                host: "",
+                adapterID: $0.preferredAdapterID,
+                credentialSource: nil,
+                credentialKind: nil,
+                nextAction: .manualFallback,
+                message: ""
+            ),
+            diagnostic: nil
         )
     }
     var updateThirdPartyQuotaDisplayModeHandler: (String, OfficialQuotaDisplayMode) -> Void = { _, _ in }
@@ -98,14 +107,17 @@ struct SettingsProviderConfigurationFacade {
                 snapshotPreview: nil
             )
         },
-        importRelayDraftFromBrowser: @escaping (RelaySettingsDraft) async -> RelayDiagnosticResult = {
-            RelayDiagnosticResult(
-                success: false,
-                fetchHealth: .endpointMisconfigured,
-                resolvedAdapterID: $0.preferredAdapterID,
-                resolvedAuthSource: nil,
-                message: "",
-                snapshotPreview: nil
+        importRelayDraftFromBrowser: @escaping (RelaySettingsDraft) async -> RelayBrowserImportResult = {
+            RelayBrowserImportResult(
+                discovery: RelayBrowserImportDiscovery(
+                    host: "",
+                    adapterID: $0.preferredAdapterID,
+                    credentialSource: nil,
+                    credentialKind: nil,
+                    nextAction: .manualFallback,
+                    message: ""
+                ),
+                diagnostic: nil
             )
         },
         updateThirdPartyQuotaDisplayMode: @escaping (String, OfficialQuotaDisplayMode) -> Void = { _, _ in },
@@ -286,7 +298,7 @@ struct SettingsProviderConfigurationFacade {
         await testRelayDraftHandler(draft)
     }
 
-    func importRelayDraftFromBrowser(_ draft: RelaySettingsDraft) async -> RelayDiagnosticResult {
+    func importRelayDraftFromBrowser(_ draft: RelaySettingsDraft) async -> RelayBrowserImportResult {
         await importRelayDraftFromBrowserHandler(draft)
     }
 

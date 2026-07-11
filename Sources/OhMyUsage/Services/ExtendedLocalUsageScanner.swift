@@ -217,6 +217,7 @@ final class ExtendedLocalUsageScanner {
                 cacheWriteTokens: Self.int(usage["cacheCreationTokens"]),
                 reasoningTokens: Self.int(usage["reasoningTokens"]),
                 estimatedCostUSD: costCents / 100,
+                reportedCostRequestCount: costCents > 0 ? 1 : 0,
                 unpricedRequestCount: costCents > 0 ? 0 : 1
             ),
             facets: facets

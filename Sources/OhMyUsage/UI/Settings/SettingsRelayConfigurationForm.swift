@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Relay 模板、设置草稿、Provider 配置门面与连接诊断展示原语
+ * [OUTPUT]: 对外提供 Relay 新增/编辑表单、浏览器连接预检、User ID 补充与验证后保存交互
+ * [POS]: Settings 的 Relay 配置视图层；只渲染状态并转发动作，不读取浏览器数据库或持久化秘密
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import Foundation
 import OhMyUsageDomain
 import SwiftUI
@@ -306,7 +312,18 @@ extension SettingsView {
                             let result = await providerConfiguration.importRelayDraftFromBrowser(draft)
                             guard resultGeneration == relayTestResultGeneration,
                                   navigationState.selectedProviderID == providerID else { return }
-                            relayEditorDraft.relayTestResult[providerID] = result
+                            if let diagnostic = result.diagnostic {
+                                relayEditorDraft.relayTestResult[providerID] = diagnostic
+                            } else {
+                                relayEditorDraft.relayTestResult[providerID] = RelayDiagnosticResult(
+                                    success: false,
+                                    fetchHealth: result.discovery.nextAction == .enterUserID ? .endpointMisconfigured : .authExpired,
+                                    resolvedAdapterID: result.discovery.adapterID,
+                                    resolvedAuthSource: result.discovery.credentialSource,
+                                    message: result.discovery.message,
+                                    snapshotPreview: nil
+                                )
+                            }
                         }
                     }
                 }
@@ -344,7 +361,7 @@ extension SettingsView {
                             get: { newRelaySiteDraft.baseURL },
                             set: {
                                 newRelaySiteDraft.baseURL = $0
-                                newRelaySiteDraft.testStatusVisible = false
+                                newRelaySiteDraft.invalidateValidation()
                             }
                         )
                     )
@@ -376,7 +393,7 @@ extension SettingsView {
                             get: { newRelaySiteDraft.credentialInput },
                             set: {
                                 newRelaySiteDraft.credentialInput = $0
-                                newRelaySiteDraft.testStatusVisible = false
+                                newRelaySiteDraft.invalidateValidation()
                             }
                         )
                     )
@@ -389,7 +406,7 @@ extension SettingsView {
                             get: { newRelaySiteDraft.userID },
                             set: {
                                 newRelaySiteDraft.userID = $0
-                                newRelaySiteDraft.testStatusVisible = false
+                                newRelaySiteDraft.invalidateValidation()
                             }
                         )
                     )
@@ -398,18 +415,40 @@ extension SettingsView {
                 thirdPartyThresholdRowPlaceholder(valueText: "2,000")
 
                 HStack(spacing: 12) {
-                    settingsSmallOutlineButton(viewModel.localizedText("测试链接", "Test Connection"), width: 60) {
-                        newRelaySiteDraft.testStatusVisible = true
+                    settingsSmallOutlineButton(
+                        newRelaySiteDraft.browserImportInFlight
+                            ? viewModel.localizedText("正在连接", "Connecting")
+                            : viewModel.localizedText("从浏览器连接", "Connect Browser"),
+                        width: 82
+                    ) {
+                        guard !newRelaySiteDraft.browserImportInFlight else { return }
+                        newRelaySiteDraft.browserImportInFlight = true
+                        newRelaySiteDraft.testStatusVisible = false
+                        Task {
+                            let draft = newRelaySettingsDraftForValidation()
+                            let result = await providerConfigurationFacade.importRelayDraftFromBrowser(draft)
+                            newRelaySiteDraft.browserImportResult = result
+                            newRelaySiteDraft.browserImportInFlight = false
+                            newRelaySiteDraft.testStatusVisible = true
+                        }
                     }
 
                     settingsSmallOutlineButton(viewModel.localizedText("保存站点", "Save Site"), width: 60) {
                         saveNewRelaySiteDraft()
                     }
+                    .disabled(
+                        newRelaySiteDraft.credentialInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                        newRelaySiteDraft.browserImportResult?.isReadyToSave != true
+                    )
 
-                    if newRelaySiteDraft.testStatusVisible {
-                        Text(viewModel.localizedText("链接成功接口正常", "Connection succeeded and endpoint is healthy"))
+                    if newRelaySiteDraft.browserImportInFlight {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else if newRelaySiteDraft.testStatusVisible,
+                              let importResult = newRelaySiteDraft.browserImportResult {
+                        Text(relayBrowserImportStatusText(importResult))
                             .font(.system(size: 10, weight: .regular))
-                            .foregroundStyle(Color(hex: 0x69BD64))
+                            .foregroundStyle(importResult.isReadyToSave ? Color(hex: 0x69BD64) : Color(hex: 0xEB654F))
                     }
                 }
                 .padding(.leading, thirdPartyConfigLabelWidth + thirdPartyConfigLabelSpacing - 3)
@@ -423,6 +462,40 @@ extension SettingsView {
             value: 20,
             displayText: valueText
         )
+    }
+
+    func newRelaySettingsDraftForValidation() -> RelaySettingsDraft {
+        let manifest = selectedNewRelaySiteManifest()
+        let baseProvider = ProviderDescriptor.makeOpenRelay(
+            name: resolvedRelayNameInput(typedName: newRelaySiteDraft.providerName, manifest: manifest),
+            baseURL: resolvedRelayBaseURLInput(typedBaseURL: newRelaySiteDraft.baseURL, manifest: manifest),
+            preferredAdapterID: newRelaySiteDraft.selectedPresetID ?? newRelaySiteDraft.templateID
+        )
+        var draft = RelaySettingsDraft(
+            provider: baseProvider,
+            preferredAdapterID: newRelaySiteDraft.selectedPresetID ?? newRelaySiteDraft.templateID
+        )
+        draft.balanceCredentialMode = .browserOnly
+        draft.userID = newRelaySiteDraft.userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return draft
+    }
+
+    func relayBrowserImportStatusText(_ result: RelayBrowserImportResult) -> String {
+        if let diagnostic = result.diagnostic {
+            if diagnostic.success {
+                let source = diagnostic.resolvedAuthSource ?? result.discovery.credentialSource ?? "Browser"
+                return viewModel.localizedText("连接成功 · \(source)", "Connected · \(source)")
+            }
+            return diagnostic.message
+        }
+        switch result.discovery.nextAction {
+        case .enterUserID:
+            return viewModel.localizedText("已发现浏览器登录态，请补充 User ID 后重试", "Browser login found; enter User ID and retry")
+        case .manualFallback:
+            return viewModel.localizedText("未发现可用登录态，请登录浏览器或手动填写凭证", "No browser login found; sign in or enter a credential manually")
+        case .verify:
+            return result.discovery.message
+        }
     }
 
     func openRelayConfigSection(_ provider: ProviderDescriptor) -> some View {
@@ -719,7 +792,18 @@ extension SettingsView {
                             let result = await providerConfiguration.importRelayDraftFromBrowser(currentRelayDraft())
                             guard resultGeneration == relayTestResultGeneration,
                                   navigationState.selectedProviderID == providerID else { return }
-                            relayEditorDraft.relayTestResult[providerID] = result
+                            if let diagnostic = result.diagnostic {
+                                relayEditorDraft.relayTestResult[providerID] = diagnostic
+                            } else {
+                                relayEditorDraft.relayTestResult[providerID] = RelayDiagnosticResult(
+                                    success: false,
+                                    fetchHealth: result.discovery.nextAction == .enterUserID ? .endpointMisconfigured : .authExpired,
+                                    resolvedAdapterID: result.discovery.adapterID,
+                                    resolvedAuthSource: result.discovery.credentialSource,
+                                    message: result.discovery.message,
+                                    snapshotPreview: nil
+                                )
+                            }
                         }
                     }
                 }

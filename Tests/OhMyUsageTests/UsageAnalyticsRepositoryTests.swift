@@ -33,6 +33,86 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
         XCTAssertEqual(interval.end, try fixedDate("2026-05-17T00:00:00Z"))
     }
 
+    func testMenuBarSummaryUsesNaturalDayWeekAndMonthInCalendarTimeZone() throws {
+        var calendar = Calendar(identifier: .iso8601)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Asia/Shanghai"))
+        let now = try fixedDate("2026-07-11T08:00:00Z")
+        let records = [
+            analyticsRecord(
+                source: .ccswitchProxy,
+                eventAt: try fixedDate("2026-07-11T01:00:00Z"),
+                requestID: "today",
+                totals: UsageMetricTotals(outputTokens: 100, estimatedCostUSD: 1)
+            ),
+            analyticsRecord(
+                source: .ccswitchProxy,
+                eventAt: try fixedDate("2026-07-07T01:00:00Z"),
+                requestID: "week",
+                totals: UsageMetricTotals(outputTokens: 200, estimatedCostUSD: 2, unpricedRequestCount: 1)
+            ),
+            analyticsRecord(
+                source: .ccswitchProxy,
+                eventAt: try fixedDate("2026-07-01T01:00:00Z"),
+                requestID: "month",
+                totals: UsageMetricTotals(outputTokens: 300, estimatedCostUSD: 3)
+            ),
+            analyticsRecord(
+                source: .ccswitchProxy,
+                eventAt: try fixedDate("2026-06-30T01:00:00Z"),
+                requestID: "previous-month",
+                totals: UsageMetricTotals(outputTokens: 400, estimatedCostUSD: 4)
+            ),
+            analyticsRecord(
+                source: .ccswitchProxy,
+                eventAt: try fixedDate("2025-12-01T01:00:00Z"),
+                requestID: "historical",
+                totals: UsageMetricTotals(outputTokens: 500, estimatedCostUSD: 5)
+            )
+        ]
+
+        let summary = UsageAnalyticsAggregator.menuBarSummary(
+            records: records,
+            calendar: calendar,
+            now: now
+        )
+
+        XCTAssertEqual(summary.today.totals.totalTokens, 100)
+        XCTAssertEqual(summary.week.totals.totalTokens, 300)
+        XCTAssertEqual(summary.month.totals.totalTokens, 600)
+        XCTAssertEqual(summary.week.totals.pricingState, .partial)
+        XCTAssertEqual(summary.month.totals.estimatedCostUSD, 6, accuracy: 0.001)
+        XCTAssertEqual(summary.all.totals.totalTokens, 1_500)
+        XCTAssertEqual(summary.all.totals.estimatedCostUSD, 15, accuracy: 0.001)
+        XCTAssertEqual(summary.all.totals.pricingState, .partial)
+    }
+
+    func testMenuBarSummaryIncludesPreviousMonthRecordsWhenCurrentWeekCrossesMonthBoundary() throws {
+        var calendar = Calendar(identifier: .iso8601)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "Asia/Shanghai"))
+        let now = try fixedDate("2026-08-01T08:00:00Z")
+        let summary = UsageAnalyticsAggregator.menuBarSummary(
+            records: [
+                analyticsRecord(
+                    source: .ccswitchProxy,
+                    eventAt: try fixedDate("2026-07-30T01:00:00Z"),
+                    requestID: "previous-month-same-week",
+                    totals: UsageMetricTotals(outputTokens: 200)
+                ),
+                analyticsRecord(
+                    source: .ccswitchProxy,
+                    eventAt: try fixedDate("2026-08-01T01:00:00Z"),
+                    requestID: "current-month",
+                    totals: UsageMetricTotals(outputTokens: 100)
+                )
+            ],
+            calendar: calendar,
+            now: now
+        )
+
+        XCTAssertEqual(summary.week.totals.totalTokens, 300)
+        XCTAssertEqual(summary.month.totals.totalTokens, 100)
+    }
+
     func testCacheStoreRestoresSnapshotFromDiskForFilter() throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("usage-analytics-cache-\(UUID().uuidString)", isDirectory: true)

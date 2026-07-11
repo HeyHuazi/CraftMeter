@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Provider 配置协调器、Relay 预览构建器、浏览器导入协调器与运行时 ProviderFactory
+ * [OUTPUT]: 对外提供 Provider 增删改、凭据保存、Relay 浏览器预检与连接诊断动作
+ * [POS]: AppViewModel 的 Provider 配置门面扩展；保持 UI 与具体服务实现解耦
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import Foundation
 import OhMyUsageApplication
 import OhMyUsageDomain
@@ -398,20 +404,38 @@ extension AppViewModel {
         return await testRelayConnection(descriptor: descriptor)
     }
 
-    func importRelayDraftFromBrowser(_ draft: RelaySettingsDraft) async -> RelayDiagnosticResult {
+    func importRelayDraftFromBrowser(_ draft: RelaySettingsDraft) async -> RelayBrowserImportResult {
         var importDraft = draft
-        importDraft.balanceCredentialMode = .browserPreferred
+        importDraft.balanceCredentialMode = .browserOnly
+        let normalizedBaseURL = ProviderDescriptor.normalizeRelayBaseURL(importDraft.baseURL)
+        let manifest = RelayAdapterRegistry.shared.manifest(
+            for: normalizedBaseURL,
+            preferredID: importDraft.preferredAdapterID
+        )
+        let discovery = relayBrowserImportCoordinator.discover(
+            draft: importDraft,
+            manifest: manifest
+        )
+        guard discovery.nextAction == .verify else {
+            return RelayBrowserImportResult(discovery: discovery, diagnostic: nil)
+        }
         guard let descriptor = relayDescriptorForPreview(draft: importDraft) else {
-            return RelayDiagnosticResult(
-                success: false,
-                fetchHealth: .endpointMisconfigured,
-                resolvedAdapterID: draft.preferredAdapterID,
-                resolvedAuthSource: nil,
-                message: text(.error),
-                snapshotPreview: nil
+            return RelayBrowserImportResult(
+                discovery: discovery,
+                diagnostic: RelayDiagnosticResult(
+                    success: false,
+                    fetchHealth: .endpointMisconfigured,
+                    resolvedAdapterID: manifest.id,
+                    resolvedAuthSource: discovery.credentialSource,
+                    message: text(.error),
+                    snapshotPreview: nil
+                )
             )
         }
-        return await testRelayConnection(descriptor: descriptor)
+        return RelayBrowserImportResult(
+            discovery: discovery,
+            diagnostic: await testRelayConnection(descriptor: descriptor)
+        )
     }
 
     func updateThirdPartyQuotaDisplayMode(

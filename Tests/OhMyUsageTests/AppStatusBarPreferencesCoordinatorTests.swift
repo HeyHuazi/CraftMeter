@@ -153,6 +153,21 @@ final class AppStatusBarPreferencesCoordinatorTests: XCTestCase {
         )
     }
 
+    func testSetStatusBarHistoryPeriodPersistsAndNotifies() {
+        var config = AppConfig(statusBarHistoryPeriod: .all, providers: [])
+        let coordinator = AppStatusBarPreferencesCoordinator()
+
+        XCTAssertEqual(
+            coordinator.setStatusBarHistoryPeriod(.week, config: &config),
+            StatusBarPreferencesMutationOutcome(
+                shouldPersist: true,
+                shouldNotifyDisplayConfigChange: true
+            )
+        )
+        XCTAssertEqual(config.statusBarHistoryPeriod, .week)
+        XCTAssertEqual(coordinator.setStatusBarHistoryPeriod(.week, config: &config), .none)
+    }
+
     private func makeProvider(id: String) -> ProviderDescriptor {
         var provider = ProviderDescriptor.makeOpenRelay(
             name: id.capitalized,

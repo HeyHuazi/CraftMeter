@@ -2,13 +2,16 @@ import Foundation
 
 /**
  * [INPUT]: Receives normalized request facts from local scanners and proxy log readers.
- * [OUTPUT]: Exposes analytics totals, filters, records, facets, breakdowns, and snapshots.
+ * [OUTPUT]: Exposes analytics totals, filters, records, facets, breakdowns, snapshots, and natural/all-period menu bar summaries.
  * [POS]: OhMyUsageApplication analytics contract; the single semantic boundary between ingestion, aggregation, cache, and UI.
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
 public enum UsagePricingState: String, Codable, Equatable, Sendable {
-    case priced
+    case reported
+    case estimated
+    case mixed
+    case partial
     case unknown
 }
 
@@ -21,6 +24,8 @@ public struct UsageMetricTotals: Codable, Equatable, Sendable {
     public var cacheWriteTokens: Int
     public var reasoningTokens: Int
     public var estimatedCostUSD: Double
+    public var reportedCostRequestCount: Int
+    public var estimatedCostRequestCount: Int
     public var unpricedRequestCount: Int
 
     public init(
@@ -32,6 +37,8 @@ public struct UsageMetricTotals: Codable, Equatable, Sendable {
         cacheWriteTokens: Int = 0,
         reasoningTokens: Int = 0,
         estimatedCostUSD: Double = 0,
+        reportedCostRequestCount: Int? = nil,
+        estimatedCostRequestCount: Int = 0,
         unpricedRequestCount: Int = 0
     ) {
         self.requestCount = requestCount
@@ -42,6 +49,9 @@ public struct UsageMetricTotals: Codable, Equatable, Sendable {
         self.cacheWriteTokens = cacheWriteTokens
         self.reasoningTokens = reasoningTokens
         self.estimatedCostUSD = estimatedCostUSD
+        self.reportedCostRequestCount = reportedCostRequestCount
+            ?? (estimatedCostUSD > 0 && unpricedRequestCount == 0 ? requestCount : 0)
+        self.estimatedCostRequestCount = estimatedCostRequestCount
         self.unpricedRequestCount = unpricedRequestCount
     }
 
@@ -50,7 +60,19 @@ public struct UsageMetricTotals: Codable, Equatable, Sendable {
     }
 
     public var pricingState: UsagePricingState {
-        unpricedRequestCount == 0 ? .priced : .unknown
+        if unpricedRequestCount > 0 {
+            return estimatedCostUSD > 0 ? .partial : .unknown
+        }
+        if reportedCostRequestCount > 0 && estimatedCostRequestCount > 0 {
+            return .mixed
+        }
+        if reportedCostRequestCount > 0 {
+            return .reported
+        }
+        if estimatedCostRequestCount > 0 {
+            return .estimated
+        }
+        return .unknown
     }
 
     public var successRate: Double {
@@ -73,7 +95,43 @@ public struct UsageMetricTotals: Codable, Equatable, Sendable {
         cacheWriteTokens += other.cacheWriteTokens
         reasoningTokens += other.reasoningTokens
         estimatedCostUSD += other.estimatedCostUSD
+        reportedCostRequestCount += other.reportedCostRequestCount
+        estimatedCostRequestCount += other.estimatedCostRequestCount
         unpricedRequestCount += other.unpricedRequestCount
+    }
+}
+
+public struct UsageAnalyticsPeriodSummary: Equatable, Sendable {
+    public var totals: UsageMetricTotals
+
+    public init(totals: UsageMetricTotals = UsageMetricTotals()) {
+        self.totals = totals
+    }
+}
+
+public struct UsageAnalyticsMenuBarSummary: Equatable, Sendable {
+    public var generatedAt: Date
+    public var today: UsageAnalyticsPeriodSummary
+    public var week: UsageAnalyticsPeriodSummary
+    public var month: UsageAnalyticsPeriodSummary
+    public var all: UsageAnalyticsPeriodSummary
+
+    public init(
+        generatedAt: Date,
+        today: UsageAnalyticsPeriodSummary = UsageAnalyticsPeriodSummary(),
+        week: UsageAnalyticsPeriodSummary = UsageAnalyticsPeriodSummary(),
+        month: UsageAnalyticsPeriodSummary = UsageAnalyticsPeriodSummary(),
+        all: UsageAnalyticsPeriodSummary = UsageAnalyticsPeriodSummary()
+    ) {
+        self.generatedAt = generatedAt
+        self.today = today
+        self.week = week
+        self.month = month
+        self.all = all
+    }
+
+    public static func empty(at date: Date = .distantPast) -> UsageAnalyticsMenuBarSummary {
+        UsageAnalyticsMenuBarSummary(generatedAt: date)
     }
 }
 
@@ -108,6 +166,8 @@ public struct UsageAnalyticsFilter: Codable, Equatable, Hashable, Sendable {
     public var selectedClientID: String?
     public var selectedProviderID: String?
     public var selectedProjectID: String?
+    public var selectedFacetKind: UsageAnalyticsFacetKind?
+    public var selectedFacetValue: String?
     public var range: UsageAnalyticsRange
 
     public init(
@@ -116,6 +176,8 @@ public struct UsageAnalyticsFilter: Codable, Equatable, Hashable, Sendable {
         selectedClientID: String? = nil,
         selectedProviderID: String? = nil,
         selectedProjectID: String? = nil,
+        selectedFacetKind: UsageAnalyticsFacetKind? = nil,
+        selectedFacetValue: String? = nil,
         range: UsageAnalyticsRange = .last30Days
     ) {
         self.mode = mode
@@ -123,6 +185,8 @@ public struct UsageAnalyticsFilter: Codable, Equatable, Hashable, Sendable {
         self.selectedClientID = selectedClientID
         self.selectedProviderID = selectedProviderID
         self.selectedProjectID = selectedProjectID
+        self.selectedFacetKind = selectedFacetKind
+        self.selectedFacetValue = selectedFacetValue
         self.range = range
     }
 }
@@ -136,7 +200,7 @@ public enum UsageAnalyticsRecordSource: Int, Codable, Equatable, Sendable {
     public var priority: Int { rawValue }
 }
 
-public enum UsageAnalyticsFacetKind: String, Codable, CaseIterable, Sendable {
+public enum UsageAnalyticsFacetKind: String, Codable, CaseIterable, Hashable, Sendable {
     case mcpServer
     case skill
     case craftSource
@@ -338,6 +402,45 @@ public struct UsageModelStats: Identifiable, Codable, Equatable, Sendable {
     }
 }
 
+public struct UsageAnalyticsDimensionOption: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var title: String
+    public var totalTokens: Int
+    public var requestCount: Int
+
+    public init(id: String, title: String, totalTokens: Int, requestCount: Int) {
+        self.id = id
+        self.title = title
+        self.totalTokens = totalTokens
+        self.requestCount = requestCount
+    }
+}
+
+public struct UsageAnalyticsDimensionStats: Identifiable, Codable, Equatable, Sendable {
+    public var id: String
+    public var title: String
+    public var totals: UsageMetricTotals
+    public var share: Double
+
+    public init(id: String, title: String, totals: UsageMetricTotals, share: Double) {
+        self.id = id
+        self.title = title
+        self.totals = totals
+        self.share = share
+    }
+}
+
+public struct UsageAnalyticsFacetStatsGroup: Identifiable, Codable, Equatable, Sendable {
+    public var id: UsageAnalyticsFacetKind { kind }
+    public var kind: UsageAnalyticsFacetKind
+    public var items: [UsageAnalyticsDimensionStats]
+
+    public init(kind: UsageAnalyticsFacetKind, items: [UsageAnalyticsDimensionStats]) {
+        self.kind = kind
+        self.items = items
+    }
+}
+
 public struct UsageAnalyticsModelOption: Identifiable, Codable, Equatable, Sendable {
     public var id: String
     public var title: String
@@ -358,7 +461,14 @@ public struct UsageAnalyticsSnapshot: Codable, Equatable, Sendable {
     public var providerCategoryStats: [UsageProviderCategoryStats]
     public var providerStats: [UsageProviderStats]
     public var modelStats: [UsageModelStats]
+    public var clientStats: [UsageAnalyticsDimensionStats]
+    public var projectStats: [UsageAnalyticsDimensionStats]
+    public var facetStats: [UsageAnalyticsFacetStatsGroup]
     public var availableModels: [UsageAnalyticsModelOption]
+    public var availableClients: [UsageAnalyticsDimensionOption]
+    public var availableProviders: [UsageAnalyticsDimensionOption]
+    public var availableProjects: [UsageAnalyticsDimensionOption]
+    public var availableFacetValues: [UsageAnalyticsDimensionOption]
     public var diagnostics: [String]
 
     public init(
@@ -369,7 +479,14 @@ public struct UsageAnalyticsSnapshot: Codable, Equatable, Sendable {
         providerCategoryStats: [UsageProviderCategoryStats],
         providerStats: [UsageProviderStats],
         modelStats: [UsageModelStats],
+        clientStats: [UsageAnalyticsDimensionStats] = [],
+        projectStats: [UsageAnalyticsDimensionStats] = [],
+        facetStats: [UsageAnalyticsFacetStatsGroup] = [],
         availableModels: [UsageAnalyticsModelOption],
+        availableClients: [UsageAnalyticsDimensionOption] = [],
+        availableProviders: [UsageAnalyticsDimensionOption] = [],
+        availableProjects: [UsageAnalyticsDimensionOption] = [],
+        availableFacetValues: [UsageAnalyticsDimensionOption] = [],
         diagnostics: [String]
     ) {
         self.generatedAt = generatedAt
@@ -379,7 +496,14 @@ public struct UsageAnalyticsSnapshot: Codable, Equatable, Sendable {
         self.providerCategoryStats = providerCategoryStats
         self.providerStats = providerStats
         self.modelStats = modelStats
+        self.clientStats = clientStats
+        self.projectStats = projectStats
+        self.facetStats = facetStats
         self.availableModels = availableModels
+        self.availableClients = availableClients
+        self.availableProviders = availableProviders
+        self.availableProjects = availableProjects
+        self.availableFacetValues = availableFacetValues
         self.diagnostics = diagnostics
     }
 

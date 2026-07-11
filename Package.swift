@@ -15,15 +15,18 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "OhMyUsageDomain"
+            name: "OhMyUsageDomain",
+            exclude: ["CLAUDE.md"]
         ),
         .target(
             name: "OhMyUsageInfrastructure",
-            dependencies: ["OhMyUsageDomain"]
+            dependencies: ["OhMyUsageDomain"],
+            exclude: ["CLAUDE.md"]
         ),
         .target(
             name: "OhMyUsageProviders",
-            dependencies: ["OhMyUsageDomain"]
+            dependencies: ["OhMyUsageDomain"],
+            exclude: ["CLAUDE.md"]
         ),
         .target(
             name: "OhMyUsageApplication",
@@ -32,7 +35,8 @@ let package = Package(
         ),
         .target(
             name: "OhMyUsagePresentation",
-            dependencies: ["OhMyUsageDomain"]
+            dependencies: ["OhMyUsageDomain"],
+            exclude: ["CLAUDE.md"]
         ),
         .target(
             name: "OhMyUsageFeatures",
@@ -40,7 +44,8 @@ let package = Package(
                 "OhMyUsageDomain",
                 "OhMyUsageApplication",
                 "OhMyUsagePresentation"
-            ]
+            ],
+            exclude: ["CLAUDE.md"]
         ),
         .target(
             name: "OhMyUsageBootstrap",
@@ -49,7 +54,8 @@ let package = Package(
                 "OhMyUsageApplication",
                 "OhMyUsageFeatures",
                 "OhMyUsagePresentation"
-            ]
+            ],
+            exclude: ["CLAUDE.md"]
         ),
         .executableTarget(
             name: "OhMyUsage",
@@ -62,7 +68,13 @@ let package = Package(
                 "OhMyUsageFeatures",
                 "OhMyUsageBootstrap"
             ],
-            exclude: ["App/CLAUDE.md", "Services/CLAUDE.md"],
+            exclude: [
+                "CLAUDE.md",
+                "App/CLAUDE.md",
+                "Models/CLAUDE.md",
+                "Services/CLAUDE.md",
+                "UI/Settings/CLAUDE.md"
+            ],
             resources: [
                 .process("Resources")
             ]

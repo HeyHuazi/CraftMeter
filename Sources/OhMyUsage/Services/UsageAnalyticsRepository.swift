@@ -1,9 +1,10 @@
 import Foundation
+import OhMyUsageApplication
 
 /**
- * [INPUT]: Coordinates CCSwitch and local scanners for Claude, Codex, Kimi, Gemini, Qwen, and Craft Agents.
- * [OUTPUT]: Returns aggregated snapshots plus a complete source fingerprint for cache validation.
- * [POS]: OhMyUsage Services analytics repository; IO orchestration only, with aggregation delegated to OhMyUsageApplication.
+ * [INPUT]: Coordinates CCSwitch/local scanners and a provider-aware model pricing catalog for Claude, Codex, Kimi, Gemini, Qwen, and Craft Agents.
+ * [OUTPUT]: Returns price-enriched snapshots, natural/all-period menu bar summaries, plus a complete source fingerprint for cache validation.
+ * [POS]: OhMyUsage Services analytics repository; IO/enrichment orchestration only, with pricing math and aggregation delegated to OhMyUsageApplication.
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
@@ -83,19 +84,23 @@ final class UsageAnalyticsRepository: @unchecked Sendable {
     private let nowProvider: () -> Date
     private let ccSwitchSourceFingerprintProvider: CCSwitchSourceFingerprintProvider
     private let localSourceFingerprintProvider: LocalSourceFingerprintProvider
+    private let pricingCatalog: ModelPricingCatalog
 
     init(
         ccSwitchReader: CCSwitchUsageLogReader = CCSwitchUsageLogReader(),
         calendar: Calendar = .current,
         nowProvider: @escaping () -> Date = Date.init,
         ccSwitchSourceFingerprintProvider: @escaping CCSwitchSourceFingerprintProvider = UsageAnalyticsRepository.defaultCCSwitchSourceFingerprint,
-        localSourceFingerprintProvider: @escaping LocalSourceFingerprintProvider = UsageAnalyticsRepository.defaultLocalSourceFingerprint
+        localSourceFingerprintProvider: @escaping LocalSourceFingerprintProvider = UsageAnalyticsRepository.defaultLocalSourceFingerprint,
+        pricingCatalog: ModelPricingCatalog = ModelPricingCatalog()
     ) {
         self.ccSwitchReader = ccSwitchReader
         self.calendar = calendar
         self.nowProvider = nowProvider
         self.ccSwitchSourceFingerprintProvider = ccSwitchSourceFingerprintProvider
         self.localSourceFingerprintProvider = localSourceFingerprintProvider
+        self.pricingCatalog = pricingCatalog
+        self.pricingCatalog.refreshIfNeeded()
     }
 
     func snapshot(
@@ -118,12 +123,35 @@ final class UsageAnalyticsRepository: @unchecked Sendable {
         records.append(contentsOf: localResult.records)
         diagnostics.append(contentsOf: localResult.diagnostics)
 
+        records = pricingCatalog.enrich(records)
         return UsageAnalyticsAggregator.snapshot(
             records: records,
             filter: filter,
             calendar: calendar,
             now: now,
             diagnostics: diagnostics
+        )
+    }
+
+    func menuBarSummary(
+        claudeAllConfigDirs: [String] = []
+    ) -> UsageAnalyticsMenuBarSummary {
+        let now = nowProvider()
+        let scanStart = Date.distantPast
+        var records: [UsageAnalyticsRecord] = []
+
+        let ccSwitchResult = ccSwitchReader.readUsageLogs(since: scanStart, until: now)
+        records.append(contentsOf: ccSwitchResult.records.map(\.analyticsRecord))
+        records.append(contentsOf: readLocalRecords(
+            since: scanStart,
+            claudeAllConfigDirs: claudeAllConfigDirs
+        ).records)
+
+        records = pricingCatalog.enrich(records)
+        return UsageAnalyticsAggregator.menuBarSummary(
+            records: records,
+            calendar: calendar,
+            now: now
         )
     }
 
@@ -245,13 +273,15 @@ final class UsageAnalyticsRepository: @unchecked Sendable {
                 inputTokens: event.inputTokens,
                 outputTokens: event.outputTokens,
                 cacheReadTokens: event.cacheReadTokens,
-                cacheWriteTokens: event.cacheWriteTokens
+                cacheWriteTokens: event.cacheWriteTokens,
+                unpricedRequestCount: 1
             )
         }
         return UsageMetricTotals(
             requestCount: 1,
             successCount: 1,
-            outputTokens: event.totalTokens
+            outputTokens: event.totalTokens,
+            unpricedRequestCount: 1
         )
     }
 

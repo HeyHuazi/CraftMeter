@@ -138,5 +138,84 @@ final class ExtendedLocalUsageScannerTests: XCTestCase {
         XCTAssertEqual(snapshot.totals.reasoningTokens, 3)
         XCTAssertEqual(snapshot.totals.estimatedCostUSD, 0.25, accuracy: 0.0001)
         XCTAssertEqual(snapshot.providerCategoryStats.map(\.name), ["Craft"])
+        XCTAssertEqual(snapshot.trendBuckets.reduce(0) { $0 + $1.totals.totalTokens }, 18)
+        XCTAssertEqual(snapshot.clientStats.map(\.title), ["Craft Agents"])
+        XCTAssertEqual(snapshot.projectStats.map(\.title), ["CraftMeter"])
+        XCTAssertEqual(snapshot.availableClients.map(\.title), ["Craft Agents"])
+        XCTAssertEqual(snapshot.availableProviders.map(\.title), ["Craft Agents"])
+        XCTAssertEqual(snapshot.availableProjects.map(\.title), ["CraftMeter"])
+    }
+
+    func testAggregatorBuildsFacetedOptionsAndOverlappingFacetCoverage() {
+        let now = Date(timeIntervalSince1970: 1_783_700_100)
+        let craft = UsageAnalyticsRecord(
+            source: .ohMyUsageLocal,
+            eventAt: now,
+            appType: "craft-agent",
+            clientID: "craft-agent",
+            clientName: "Craft Agents",
+            providerID: "anthropic",
+            providerName: "Anthropic",
+            modelID: "claude-opus",
+            projectID: "craftmeter",
+            projectName: "CraftMeter",
+            requestID: "r1",
+            totals: UsageMetricTotals(requestCount: 1, successCount: 1, inputTokens: 100),
+            facets: [
+                UsageAnalyticsFacetEvent(kind: .craftSource, value: "github", displayName: "GitHub"),
+                UsageAnalyticsFacetEvent(kind: .craftSource, value: "notion", displayName: "Notion"),
+                UsageAnalyticsFacetEvent(kind: .permissionMode, value: "execute")
+            ]
+        )
+        let other = UsageAnalyticsRecord(
+            source: .ohMyUsageLocal,
+            eventAt: now,
+            appType: "gemini-cli",
+            clientID: "gemini-cli",
+            clientName: "Gemini CLI",
+            providerID: "google",
+            providerName: "Google",
+            modelID: "gemini",
+            projectID: "other",
+            projectName: "Other",
+            requestID: "r2",
+            totals: UsageMetricTotals(requestCount: 1, successCount: 1, inputTokens: 50)
+        )
+        let filter = UsageAnalyticsFilter(
+            selectedClientID: "craft-agent",
+            selectedFacetKind: .craftSource,
+            range: .last24Hours
+        )
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let snapshot = UsageAnalyticsAggregator.snapshot(
+            records: [craft, other],
+            filter: filter,
+            calendar: calendar,
+            now: now,
+            diagnostics: []
+        )
+
+        XCTAssertEqual(snapshot.totals.totalTokens, 100)
+        XCTAssertEqual(Set(snapshot.availableClients.map(\.id)), ["craft-agent", "gemini-cli"])
+        XCTAssertEqual(snapshot.availableProviders.map(\.id), ["anthropic"])
+        XCTAssertEqual(Set(snapshot.availableFacetValues.map(\.id)), ["github", "notion"])
+        let sourceItems = snapshot.facetStats.first { $0.kind == .craftSource }?.items ?? []
+        XCTAssertEqual(Set(sourceItems.map(\.id)), ["github", "notion"])
+        XCTAssertEqual(sourceItems.reduce(0) { $0 + $1.share }, 2, accuracy: 0.0001)
+
+        let githubSnapshot = UsageAnalyticsAggregator.snapshot(
+            records: [craft, other],
+            filter: UsageAnalyticsFilter(
+                selectedFacetKind: .craftSource,
+                selectedFacetValue: "github",
+                range: .last24Hours
+            ),
+            calendar: calendar,
+            now: now,
+            diagnostics: []
+        )
+        XCTAssertEqual(githubSnapshot.totals.totalTokens, 100)
+        XCTAssertEqual(githubSnapshot.clientStats.map(\.title), ["Craft Agents"])
     }
 }

@@ -19,8 +19,11 @@ jobs:
         with:
           swift-version: "6.2.0"
 
-      - name: Build
+      - name: Build Debug
         run: swift build
+
+      - name: Build Release
+        run: swift build -c release
 
       - name: Test
         run: swift test

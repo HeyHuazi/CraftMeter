@@ -7,6 +7,51 @@ import OhMyUsagePresentation
 import XCTest
 
 final class ArchitectureTargetBoundaryTests: XCTestCase {
+    func testProductionTargetsExposeGEBModuleMaps() throws {
+        let rootURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let targets = try packageManifestTargets()
+
+        for target in targets.values where target.kind != .test {
+            let moduleMapURL = rootURL
+                .appendingPathComponent("Sources")
+                .appendingPathComponent(target.name)
+                .appendingPathComponent("CLAUDE.md")
+            XCTAssertTrue(
+                FileManager.default.fileExists(atPath: moduleMapURL.path),
+                "Production target \(target.name) must expose an L2 CLAUDE.md module map"
+            )
+            let moduleMap = try String(contentsOf: moduleMapURL, encoding: .utf8)
+            XCTAssertTrue(moduleMap.contains("[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md"))
+        }
+    }
+
+    func testMaintainedBusinessFilesExposeGEBContracts() throws {
+        let rootURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let maintainedFiles = [
+            "Sources/OhMyUsage/App/AppViewModel.swift",
+            "Sources/OhMyUsage/App/AppViewModel+StatusBarDisplay.swift",
+            "Sources/OhMyUsage/Services/ExtendedLocalUsageScanner.swift",
+            "Sources/OhMyUsage/Services/UsageAnalyticsRepository.swift",
+            "Sources/OhMyUsageApplication/UsageAnalyticsAggregator.swift",
+            "Sources/OhMyUsageApplication/UsageAnalyticsSnapshotCacheStore.swift",
+            "Sources/OhMyUsageApplication/UsageAnalyticsTypes.swift",
+            "Sources/OhMyUsage/UI/Settings/UsageAnalyticsSettingsView.swift"
+        ]
+
+        for relativePath in maintainedFiles {
+            let source = try String(
+                contentsOf: rootURL.appendingPathComponent(relativePath),
+                encoding: .utf8
+            )
+            for marker in ["[INPUT]:", "[OUTPUT]:", "[POS]:", "[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md"] {
+                XCTAssertTrue(
+                    source.contains(marker),
+                    "\(relativePath) must expose GEB L3 marker \(marker)"
+                )
+            }
+        }
+    }
+
     func testNonExecutableTargetsKeepDependencyDirection() throws {
         let rules: [(directory: String, forbiddenImports: [String])] = [
             (

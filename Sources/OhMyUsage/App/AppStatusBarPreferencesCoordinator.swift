@@ -1,5 +1,12 @@
 import Foundation
 
+/**
+ * [INPUT]: 依赖 AppConfig、可见 Provider 与账户槽位状态。
+ * [OUTPUT]: 对外提供菜单栏偏好规范化和原子 mutation 结果。
+ * [POS]: App 的菜单栏配置事务边界，统一决定持久化、重绘与 Provider 刷新副作用。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 struct StatusBarPreferencesMutationOutcome: Equatable {
     var shouldPersist: Bool = false
     var shouldNotifyDisplayConfigChange: Bool = false
@@ -63,6 +70,18 @@ struct AppStatusBarPreferencesCoordinator {
     ) -> StatusBarPreferencesMutationOutcome {
         guard config.statusBarDisplayStyle != style else { return .none }
         config.statusBarDisplayStyle = style
+        return StatusBarPreferencesMutationOutcome(
+            shouldPersist: true,
+            shouldNotifyDisplayConfigChange: true
+        )
+    }
+
+    func setStatusBarHistoryPeriod(
+        _ period: StatusBarHistoryPeriod,
+        config: inout AppConfig
+    ) -> StatusBarPreferencesMutationOutcome {
+        guard config.statusBarHistoryPeriod != period else { return .none }
+        config.statusBarHistoryPeriod = period
         return StatusBarPreferencesMutationOutcome(
             shouldPersist: true,
             shouldNotifyDisplayConfigChange: true

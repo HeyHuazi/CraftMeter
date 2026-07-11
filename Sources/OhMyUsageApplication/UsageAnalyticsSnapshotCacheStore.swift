@@ -86,7 +86,7 @@ public struct UsageAnalyticsCacheEntry: Codable, Equatable, Sendable {
 }
 
 public final class UsageAnalyticsSnapshotCacheStore: @unchecked Sendable {
-    private static let currentSchemaVersion = 2
+    private static let currentSchemaVersion = 4
 
     private struct CachePayload: Codable {
         var schemaVersion: Int

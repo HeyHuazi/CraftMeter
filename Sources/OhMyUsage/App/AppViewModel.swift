@@ -5,11 +5,19 @@ import Foundation
 import Observation
 import UserNotifications
 
+/**
+ * [INPUT]: 依赖配置仓储、Provider 工厂、凭据/通知服务、历史统计协调器与 macOS 运行时能力。
+ * [OUTPUT]: 对外提供 CraftMeter 全局可观察状态、生命周期动作及各功能协调器的统一入口。
+ * [POS]: App 层状态中枢；保存会话状态并委托专职 coordinator，避免 UI 直接操作服务实现。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 @MainActor
 @Observable
 final class AppViewModel {
     let keychain: KeychainService
     let configurationRepository: any AppConfigurationRepositorying
+    @ObservationIgnored let statusBarNotificationCenter: NotificationCenter
     @ObservationIgnored let credentialAccessService: CredentialAccessService
     let thirdPartyBalanceBaselineStore = ThirdPartyBalanceBaselineStore()
     let codexSlotStore: CodexAccountSlotStore
@@ -29,6 +37,7 @@ final class AppViewModel {
     @ObservationIgnored private let localSessionRefreshCoordinator: LocalSessionRefreshCoordinator
     @ObservationIgnored private let localUsageHistoryRepository: LocalUsageHistoryRepository
     @ObservationIgnored private let usageAnalyticsRefreshCoordinator: UsageAnalyticsRefreshCoordinator
+    @ObservationIgnored let menuBarUsageAnalyticsCoordinator: MenuBarUsageAnalyticsCoordinator
     @ObservationIgnored var refreshScheduler: ProviderRefreshScheduler?
     @ObservationIgnored let providerRefreshCoordinator: AppProviderRefreshCoordinator
     @ObservationIgnored let officialAccountImportCoordinator = AppOfficialAccountImportCoordinator()
@@ -47,6 +56,7 @@ final class AppViewModel {
     @ObservationIgnored let resetCoordinator = AppResetCoordinator()
     @ObservationIgnored let relayProviderSettingsCoordinator = AppRelayProviderSettingsCoordinator()
     @ObservationIgnored let relayDescriptorPreviewBuilder = RelayDescriptorPreviewBuilder()
+    @ObservationIgnored let relayBrowserImportCoordinator: RelayBrowserImportCoordinator
     @ObservationIgnored let statusBarPreferencesCoordinator = AppStatusBarPreferencesCoordinator()
     @ObservationIgnored let configurationMutationCoordinator = AppConfigurationMutationCoordinator()
     @ObservationIgnored let settingsPersistenceFeedbackCoordinator: AppSettingsPersistenceFeedbackCoordinator
@@ -182,6 +192,7 @@ final class AppViewModel {
     var usageAnalyticsFilter = UsageAnalyticsFilter()
     private(set) var usageAnalyticsSnapshot = UsageAnalyticsSnapshot.empty(filter: UsageAnalyticsFilter())
     private(set) var usageAnalyticsLoading = false
+    var menuBarUsageAnalyticsSummary = UsageAnalyticsMenuBarSummary.empty()
     private(set) var menuPanelVisible: Bool {
         get { sessionStore.menuPanelVisible }
         set { sessionStore.menuPanelVisible = newValue }
@@ -250,19 +261,29 @@ final class AppViewModel {
         keychain: KeychainService = KeychainService(),
         localUsageHistoryRepository: LocalUsageHistoryRepository = LocalUsageHistoryRepository(),
         usageAnalyticsRefreshCoordinator: UsageAnalyticsRefreshCoordinator = UsageAnalyticsRefreshCoordinator(),
+        menuBarUsageAnalyticsCoordinator: MenuBarUsageAnalyticsCoordinator = MenuBarUsageAnalyticsCoordinator(),
+        browserCredentialService: BrowserCredentialService = BrowserCredentialService(),
+        statusBarNotificationCenter: NotificationCenter = .default,
         updateInstallBufferDelaySeconds: TimeInterval = 2,
         updateCheckStatusClearDelaySeconds: TimeInterval = 10,
         settingsPersistenceStatusClearDelaySeconds: TimeInterval = 4
     ) {
         self.keychain = keychain
         self.configurationRepository = configurationRepository
+        self.statusBarNotificationCenter = statusBarNotificationCenter
         self.credentialAccessService = CredentialAccessService(keychain: keychain)
         self.codexSlotStore = codexSlotStore
         self.codexProfileStore = codexProfileStore
         self.codexDesktopAuthService = codexDesktopAuthService
         self.codexDesktopAppService = codexDesktopAppService
         self.notifications = notificationService
-        let resolvedProviderFactory = providerFactory ?? ProviderFactory(keychain: keychain)
+        self.relayBrowserImportCoordinator = RelayBrowserImportCoordinator(
+            browserCredentialService: browserCredentialService
+        )
+        let resolvedProviderFactory = providerFactory ?? ProviderFactory(
+            keychain: keychain,
+            browserCredentialService: browserCredentialService
+        )
         self.providerRefreshCoordinator = AppProviderRefreshCoordinator(
             providerFactory: resolvedProviderFactory,
             notifications: notificationService
@@ -289,6 +310,7 @@ final class AppViewModel {
         self.providerFactory = resolvedProviderFactory
         self.localUsageHistoryRepository = localUsageHistoryRepository
         self.usageAnalyticsRefreshCoordinator = usageAnalyticsRefreshCoordinator
+        self.menuBarUsageAnalyticsCoordinator = menuBarUsageAnalyticsCoordinator
         self.localSessionRefreshCoordinator = LocalSessionRefreshCoordinator(
             signalSource: localSessionSignalMonitor
         )
@@ -335,19 +357,29 @@ final class AppViewModel {
         keychain: KeychainService = KeychainService(),
         localUsageHistoryRepository: LocalUsageHistoryRepository = LocalUsageHistoryRepository(),
         usageAnalyticsRefreshCoordinator: UsageAnalyticsRefreshCoordinator = UsageAnalyticsRefreshCoordinator(),
+        menuBarUsageAnalyticsCoordinator: MenuBarUsageAnalyticsCoordinator = MenuBarUsageAnalyticsCoordinator(),
+        browserCredentialService: BrowserCredentialService = BrowserCredentialService(),
+        statusBarNotificationCenter: NotificationCenter = .default,
         updateInstallBufferDelaySeconds: TimeInterval = 2,
         updateCheckStatusClearDelaySeconds: TimeInterval = 10,
         settingsPersistenceStatusClearDelaySeconds: TimeInterval = 4
     ) {
         self.keychain = keychain
         self.configurationRepository = configurationRepository
+        self.statusBarNotificationCenter = statusBarNotificationCenter
         self.credentialAccessService = CredentialAccessService(keychain: keychain)
         self.codexSlotStore = codexSlotStore
         self.codexProfileStore = codexProfileStore
         self.codexDesktopAuthService = codexDesktopAuthService
         self.codexDesktopAppService = codexDesktopAppService
         self.notifications = notificationService
-        let resolvedProviderFactory = providerFactory ?? ProviderFactory(keychain: keychain)
+        self.relayBrowserImportCoordinator = RelayBrowserImportCoordinator(
+            browserCredentialService: browserCredentialService
+        )
+        let resolvedProviderFactory = providerFactory ?? ProviderFactory(
+            keychain: keychain,
+            browserCredentialService: browserCredentialService
+        )
         self.providerRefreshCoordinator = AppProviderRefreshCoordinator(
             providerFactory: resolvedProviderFactory,
             notifications: notificationService
@@ -365,6 +397,7 @@ final class AppViewModel {
         self.providerFactory = resolvedProviderFactory
         self.localUsageHistoryRepository = localUsageHistoryRepository
         self.usageAnalyticsRefreshCoordinator = usageAnalyticsRefreshCoordinator
+        self.menuBarUsageAnalyticsCoordinator = menuBarUsageAnalyticsCoordinator
         self.localSessionRefreshCoordinator = LocalSessionRefreshCoordinator(
             signalSource: localSessionSignalMonitor
         )
@@ -708,7 +741,7 @@ final class AppViewModel {
         )
     }
 
-    private func usageAnalyticsClaudeAllConfigDirs() -> [String] {
+    func usageAnalyticsClaudeAllConfigDirs() -> [String] {
         Array(Set(claudeProfiles.compactMap { profile in
             profile.configDir?.trimmingCharacters(in: .whitespacesAndNewlines)
         }.filter { !$0.isEmpty })).sorted()

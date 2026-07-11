@@ -2,6 +2,13 @@ import Foundation
 import OhMyUsageApplication
 import SQLite3
 
+/**
+ * [INPUT]: 只读访问 CCSwitch proxy request 与 daily rollup SQLite 表的请求、Provider、模型和 Token 事实。
+ * [OUTPUT]: 对外提供带 source priority、未定价状态和完整文件指纹的 CCSwitch usage records。
+ * [POS]: Services 的 CCSwitch ingestion adapter；不计算模型价格，由 Repository 后续 enrichment。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
 enum CCSwitchUsageSource: String, Equatable, Sendable {
@@ -40,7 +47,8 @@ struct CCSwitchUsageRecord: Equatable, Sendable {
             inputTokens: inputTokens,
             outputTokens: outputTokens,
             cacheReadTokens: cacheReadTokens,
-            cacheWriteTokens: cacheWriteTokens
+            cacheWriteTokens: cacheWriteTokens,
+            unpricedRequestCount: requestCount
         )
     }
 

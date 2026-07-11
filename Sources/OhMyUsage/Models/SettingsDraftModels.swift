@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 OhMyUsageDomain 的账号标识与本地统计范围类型
+ * [OUTPUT]: 对外提供设置导航、权限提示、编辑器草稿与弹窗状态模型
+ * [POS]: Models 的设置交互状态边界，供 SwiftUI 设置工作台统一持有和切换
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import Foundation
 import OhMyUsageDomain
 
@@ -35,7 +41,6 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     case localData
     case officialProviders
     case customProviders
-    case donate
 
     var id: String { rawValue }
 
@@ -157,8 +162,15 @@ struct NewRelaySiteDraftState {
     var credentialInput = ""
     var userID = ""
     var testStatusVisible = false
+    var browserImportInFlight = false
+    var browserImportResult: RelayBrowserImportResult?
     var templateID = "generic-newapi"
     var selectedPresetID: String?
+
+    mutating func invalidateValidation() {
+        testStatusVisible = false
+        browserImportResult = nil
+    }
 
     mutating func reset(using templateID: String) {
         providerName = ""
@@ -166,6 +178,8 @@ struct NewRelaySiteDraftState {
         credentialInput = ""
         userID = ""
         testStatusVisible = false
+        browserImportInFlight = false
+        browserImportResult = nil
         selectedPresetID = nil
         self.templateID = templateID
     }

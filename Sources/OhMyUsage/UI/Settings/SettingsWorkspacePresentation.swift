@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 SettingsTab 与调用方提供的本地化函数、通用设置标题
+ * [OUTPUT]: 对外提供设置页头部和侧边栏的纯展示模型与构建器
+ * [POS]: UI/Settings 的无状态呈现层，将导航语义映射为可测试文案与图标配置
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import Foundation
 
 struct SettingsHeaderPresentation: Equatable {
@@ -102,12 +108,6 @@ enum SettingsWorkspacePresenter {
                 "配置 Relay、New API 和第三方余额接口。",
                 "Configure Relay, New API, and third-party balance endpoints."
             )
-        case .donate:
-            title = localizedText("请我喝咖啡", "Buy me a coffee")
-            subtitle = localizedText(
-                "如果 CraftMeter 帮到了你，可以请我喝杯咖啡，或者随手赞赏支持一下继续维护。",
-                "If CraftMeter has helped you, you can buy me a coffee or support continued maintenance."
-            )
         }
 
         return SettingsHeaderPresentation(
@@ -160,12 +160,6 @@ enum SettingsWorkspacePresenter {
                             tab: .customProviders,
                             icon: "settings_sidebar_relay_icon",
                             title: localizedText("中转代理", "Relay")
-                        ),
-                        SettingsSidebarItemPresentation(
-                            tab: .donate,
-                            icon: "settings_sidebar_donate_icon",
-                            selectedIcon: "settings_sidebar_donate_icon_selected",
-                            title: localizedText("请我喝咖啡", "Buy me a coffee")
                         )
                     ]
                 )

@@ -1,5 +1,12 @@
 import Foundation
 
+/**
+ * [INPUT]: 依赖 AppConfig、Provider 状态、历史摘要协调器与配置持久化能力。
+ * [OUTPUT]: 对外提供菜单栏展示样式、历史周期、Provider 选择及摘要刷新桥接 API。
+ * [POS]: AppViewModel 的状态栏适配层，隔离 SwiftUI/控制器与持久化模型细节。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 extension AppViewModel {
     nonisolated static var statusBarDisplayConfigDidChangeNotification: Notification.Name {
         Notification.Name("CraftMeter.StatusBarDisplayConfigDidChange")
@@ -20,6 +27,10 @@ extension AppViewModel {
         config.statusBarDisplayStyle
     }
 
+    var statusBarHistoryPeriod: StatusBarHistoryPeriod {
+        config.statusBarHistoryPeriod
+    }
+
     var statusBarAppearanceMode: StatusBarAppearanceMode {
         config.statusBarAppearanceMode
     }
@@ -30,6 +41,22 @@ extension AppViewModel {
 
     var claudeStatusBarDisplaySlotID: CodexSlotID? {
         config.claudeStatusBarDisplaySlotID
+    }
+
+    var usesStatusBarUsageAnalytics: Bool {
+        config.statusBarDisplayStyle.usesUsageAnalytics
+    }
+
+    func refreshMenuBarUsageAnalyticsIfNeeded(force: Bool = false) {
+        menuBarUsageAnalyticsCoordinator.refreshIfNeeded(
+            enabled: usesStatusBarUsageAnalytics,
+            claudeAllConfigDirs: usageAnalyticsClaudeAllConfigDirs(),
+            force: force
+        ) { [weak self] summary in
+            guard let self else { return }
+            self.menuBarUsageAnalyticsSummary = summary
+            self.notifyStatusBarDisplayConfigChanged()
+        }
     }
 
     func isStatusBarProvider(providerID: String) -> Bool {
@@ -56,6 +83,15 @@ extension AppViewModel {
     func setStatusBarDisplayStyle(_ style: StatusBarDisplayStyle) {
         let outcome = statusBarPreferencesCoordinator.setStatusBarDisplayStyle(
             style,
+            config: &config
+        )
+        applyStatusBarPreferencesMutation(outcome)
+        refreshMenuBarUsageAnalyticsIfNeeded(force: style.usesUsageAnalytics)
+    }
+
+    func setStatusBarHistoryPeriod(_ period: StatusBarHistoryPeriod) {
+        let outcome = statusBarPreferencesCoordinator.setStatusBarHistoryPeriod(
+            period,
             config: &config
         )
         applyStatusBarPreferencesMutation(outcome)
@@ -227,9 +263,9 @@ extension AppViewModel {
     }
 
     func notifyStatusBarDisplayConfigChanged() {
-        NotificationCenter.default.post(
+        statusBarNotificationCenter.post(
             name: Self.statusBarDisplayConfigDidChangeNotification,
-            object: nil
+            object: self
         )
     }
 }

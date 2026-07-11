@@ -54,6 +54,26 @@ enum ResourceMode: String, CaseIterable, Identifiable, Codable {
 enum StatusBarDisplayStyle: String, Codable, CaseIterable, Identifiable {
     case iconPercent
     case barNamePercent
+    case usageTokens
+    case estimatedCost
+
+    var id: String { rawValue }
+
+    var usesUsageAnalytics: Bool {
+        switch self {
+        case .usageTokens, .estimatedCost:
+            return true
+        case .iconPercent, .barNamePercent:
+            return false
+        }
+    }
+}
+
+enum StatusBarHistoryPeriod: String, Codable, CaseIterable, Identifiable {
+    case today
+    case week
+    case month
+    case all
 
     var id: String { rawValue }
 }

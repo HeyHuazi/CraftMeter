@@ -5,10 +5,10 @@ Swift 6.2 + SwiftUI/AppKit + SwiftPM + XCTest，macOS 14+
 
 <directory>
 Sources/ - 生产代码 (8 targets: OhMyUsage executable + Domain/Infrastructure/Providers/Application/Presentation/Features/Bootstrap)
-Tests/ - XCTest 与架构边界测试 (1 target: OhMyUsageTests)
+Tests/ - XCTest、架构依赖边界与 GEB 文档同构门禁 (1 target: OhMyUsageTests)
 docs/ - 架构、Provider、安装与发布说明
 scripts/ - CraftMeter DMG/ZIP 构建脚本
-.github/ - Swift CI 与 GitHub Release 工作流
+.github/ - Swift debug/release CI 与 GitHub Preview Release 工作流
 </directory>
 
 <config>
@@ -44,6 +44,6 @@ Local Logs -> Scanners -> UsageAnalyticsRecord/Facets -> Aggregator -> Cache -> 
 1. 检查业务文件 L3 `[INPUT]/[OUTPUT]/[POS]`。
 2. 文件增删、职责或接口变化时更新最近的 L2 `CLAUDE.md`。
 3. target、顶级目录、技术栈或全局数据流变化时更新本文件。
-4. 运行 `swift build` 与 `swift test`。
+4. 运行 `swift build`、`swift build -c release` 与 `swift test`。
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

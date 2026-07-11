@@ -3,7 +3,10 @@
 ## Repository and version
 
 - Work from a clean release branch in `HeyHuazi/CraftMeter`.
-- Confirm `VERSION` matches the intended `v*` tag.
+- Treat root `VERSION` as the single source of truth for the maintained application version.
+- For every user-visible feature release, update `VERSION`, the README current-version line, release notes, and the intended `v*` tag together.
+- Confirm `VERSION` matches the intended `v*` tag and `APP_VERSION` used by packaging.
+- Confirm the README build command reads `APP_VERSION=$(cat VERSION)` instead of embedding a stale version.
 - Confirm `AppUpdateService` points to `HeyHuazi/CraftMeter`.
 - Confirm `README.md`, `LICENSE`, and `NOTICE` are current.
 
@@ -53,8 +56,10 @@ Mount the DMG and verify:
 ## Analytics smoke test
 
 - Claude Code, Codex, Kimi, Gemini CLI, Qwen Code, Craft Agents, and CCSwitch failures are isolated per source.
-- reasoning token and cost UI render correctly.
-- unknown pricing displays as a lower bound, not zero.
+- reasoning token and reported/estimated/mixed/partial/unknown cost UI render correctly.
+- Models.dev estimates are visibly described as estimates rather than billing truth.
+- provider-ambiguous, relay, OpenRouter, Azure, Vertex, Bedrock, and CCSwitch proxy records do not borrow official direct-provider prices.
+- unknown pricing displays as unknown; a known lower bound displays with `≥`, never as zero.
 - no prompt, assistant, tool result, or attachment body appears in cache files.
 
 ## GitHub Release

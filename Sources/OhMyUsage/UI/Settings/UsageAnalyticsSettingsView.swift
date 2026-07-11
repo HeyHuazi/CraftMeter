@@ -1,9 +1,9 @@
 import SwiftUI
 
 /**
- * [INPUT]: Observes cached UsageAnalyticsSnapshot state from AppViewModel.
- * [OUTPUT]: Renders range controls, totals, token/cost trends, and provider/model breakdowns.
- * [POS]: OhMyUsage Settings analytics feature; presentation only, with scanning and aggregation kept outside SwiftUI.
+ * [INPUT]: Observes cached UsageAnalyticsSnapshot state from AppViewModel and model brand presentation metadata.
+ * [OUTPUT]: Renders range controls, totals, token/cost trends, dimension breakdowns, typed facets, and model brand icons.
+ * [POS]: OhMyUsage Settings analytics feature; presentation orchestration only, with scanning and aggregation kept outside SwiftUI.
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
@@ -13,6 +13,7 @@ struct UsageAnalyticsSettingsView: View {
 
     @State private var hoveredBucketID: String?
     @State private var selectedStatisticsBreakdown: UsageStatisticsBreakdown = .provider
+    @State private var selectedFacetKind: UsageAnalyticsFacetKind = .mcpServer
 
     private var snapshot: UsageAnalyticsSnapshot {
         viewModel.usageAnalyticsSnapshot
@@ -27,6 +28,9 @@ struct UsageAnalyticsSettingsView: View {
                     overviewModule
                     trendModule
                     statisticsModule
+                    if !snapshot.facetStats.isEmpty {
+                        facetModule
+                    }
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 12)
@@ -37,11 +41,9 @@ struct UsageAnalyticsSettingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
-            viewModel.usageAnalyticsFilter.mode = .all
-            viewModel.usageAnalyticsFilter.selectedModelID = nil
             viewModel.refreshUsageAnalyticsIfNeeded(force: false)
         }
-        .onChange(of: viewModel.usageAnalyticsFilter.range) { _, _ in
+        .onChange(of: viewModel.usageAnalyticsFilter) { _, _ in
             viewModel.refreshUsageAnalyticsIfNeeded(force: false)
         }
     }
@@ -69,6 +71,14 @@ struct UsageAnalyticsSettingsView: View {
             }
             .frame(width: 252, height: 24)
 
+            UsageAnalyticsFilterBar(
+                filter: Binding(
+                    get: { viewModel.usageAnalyticsFilter },
+                    set: { viewModel.usageAnalyticsFilter = $0 }
+                ),
+                snapshot: snapshot
+            )
+
             Button {
                 viewModel.refreshUsageAnalytics()
             } label: {
@@ -87,8 +97,23 @@ struct UsageAnalyticsSettingsView: View {
     }
 
     private var overviewModule: some View {
-        module(title: "总览", subtitle: "") {
+        module(title: "总览", subtitle: pricingSubtitle) {
             UsageOverviewMetricsGrid(totals: snapshot.totals)
+        }
+    }
+
+    private var pricingSubtitle: String {
+        switch snapshot.totals.pricingState {
+        case .reported:
+            return "费用来自上游日志报告。"
+        case .estimated:
+            return "费用按 Models.dev 当前公开模型价格估算，不等同于账单。"
+        case .mixed:
+            return "费用同时包含上游报告与 Models.dev 公开价格估算。"
+        case .partial:
+            return "已知金额是下界；部分请求或 Token 类型仍无法定价。"
+        case .unknown:
+            return "当前记录缺少可可靠匹配的费用或模型价格。"
         }
     }
 
@@ -131,13 +156,15 @@ struct UsageAnalyticsSettingsView: View {
                 textColor: Color.white.opacity(0.80),
                 height: 24,
                 segmentWidths: [
+                    .client: 58,
                     .provider: 58,
+                    .project: 48,
                     .model: 48
                 ]
             ) { selection in
                 selectedStatisticsBreakdown = selection
             }
-            .frame(width: 106, height: 24)
+            .frame(width: 212, height: 24)
 
             UsagePieAndTableView(
                 pieItems: statisticsPieItems,
@@ -149,36 +176,76 @@ struct UsageAnalyticsSettingsView: View {
 
     private var statisticsPieItems: [UsagePieItem] {
         switch selectedStatisticsBreakdown {
+        case .client:
+            return snapshot.clientStats.map { UsagePieItem(id: $0.id, title: $0.title, share: $0.share) }
         case .provider:
-            return snapshot.providerStats.map {
-                UsagePieItem(id: $0.id, title: $0.providerName, share: $0.share)
-            }
+            return snapshot.providerStats.map { UsagePieItem(id: $0.id, title: $0.providerName, share: $0.share) }
+        case .project:
+            return snapshot.projectStats.map { UsagePieItem(id: $0.id, title: $0.title, share: $0.share) }
         case .model:
             return snapshot.modelStats.map {
-                UsagePieItem(id: $0.id, title: $0.modelID, share: $0.share)
+                UsagePieItem(
+                    id: $0.id,
+                    title: $0.modelID,
+                    share: $0.share,
+                    modelBrand: UsageAnalyticsModelBrandResolver.resolve(
+                        modelID: $0.modelID,
+                        providerName: $0.providerName,
+                        appType: $0.appType
+                    )
+                )
             }
         }
     }
 
     private var statisticsRows: [UsageStatsTableRow] {
         switch selectedStatisticsBreakdown {
+        case .client:
+            return snapshot.clientStats.map { UsageStatsTableRow(id: $0.id, title: $0.title, totals: $0.totals) }
         case .provider:
-            return snapshot.providerStats.map {
-                UsageStatsTableRow(
-                    id: $0.id,
-                    title: $0.providerName,
-                    totals: $0.totals
-                )
-            }
+            return snapshot.providerStats.map { UsageStatsTableRow(id: $0.id, title: $0.providerName, totals: $0.totals) }
+        case .project:
+            return snapshot.projectStats.map { UsageStatsTableRow(id: $0.id, title: $0.title, totals: $0.totals) }
         case .model:
             return snapshot.modelStats.map {
                 UsageStatsTableRow(
                     id: $0.id,
                     title: $0.modelID,
-                    totals: $0.totals
+                    totals: $0.totals,
+                    modelBrand: UsageAnalyticsModelBrandResolver.resolve(
+                        modelID: $0.modelID,
+                        providerName: $0.providerName,
+                        appType: $0.appType
+                    )
                 )
             }
         }
+    }
+
+    private var facetModule: some View {
+        module(title: "Craft 活动", subtitle: "同一请求可归属多个活动项，覆盖率不会强制相加为 100%。") {
+            VStack(alignment: .leading, spacing: 12) {
+                Picker("活动维度", selection: $selectedFacetKind) {
+                    ForEach(availableFacetKinds, id: \.self) { kind in
+                        Text(kind.title).tag(kind)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+
+                UsageFacetCoverageList(items: selectedFacetItems, theme: theme)
+            }
+        }
+    }
+
+    private var availableFacetKinds: [UsageAnalyticsFacetKind] {
+        snapshot.facetStats.map(\.kind)
+    }
+
+    private var selectedFacetItems: [UsageAnalyticsDimensionStats] {
+        let kind = availableFacetKinds.contains(selectedFacetKind) ? selectedFacetKind : availableFacetKinds.first
+        guard let kind else { return [] }
+        return snapshot.facetStats.first { $0.kind == kind }?.items ?? []
     }
 
     private func module<Content: View>(
@@ -227,12 +294,16 @@ struct UsageAnalyticsSettingsView: View {
 }
 
 private enum UsageStatisticsBreakdown: String, CaseIterable, Hashable {
+    case client
     case provider
+    case project
     case model
 
     var title: String {
         switch self {
+        case .client: return "客户端"
         case .provider: return "供应商"
+        case .project: return "项目"
         case .model: return "模型"
         }
     }
@@ -245,9 +316,9 @@ private let timeRangeOptions: [UsageAnalyticsRange] = [
     .last30Days
 ]
 
-private let usageText80 = Color.white.opacity(0.80)
-private let usageText55 = Color.white.opacity(0.55)
-private let usageText40 = Color.white.opacity(0.40)
+let usageText80 = Color.white.opacity(0.80)
+let usageText55 = Color.white.opacity(0.55)
+let usageText40 = Color.white.opacity(0.40)
 private let usageText30 = Color.white.opacity(0.30)
 
 private func timeRangeTitle(_ range: UsageAnalyticsRange) -> String {
@@ -389,280 +460,7 @@ private struct UsageHoverDetailView: View {
     }
 }
 
-private struct UsagePieItem: Identifiable {
-    var id: String
-    var title: String
-    var share: Double
-}
-
-private struct UsageStatsTableRow: Identifiable {
-    var id: String
-    var title: String
-    var totals: UsageMetricTotals
-}
-
-private struct UsagePieAndTableView: View {
-    var pieItems: [UsagePieItem]
-    var rows: [UsageStatsTableRow]
-    var theme: SettingsTheme
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .center, spacing: 40) {
-                Spacer(minLength: 0)
-
-                UsagePieChartView(items: pieItems, theme: theme)
-                    .frame(width: 160, height: 160)
-
-                legend
-                    .frame(width: 260, alignment: .leading)
-
-                Spacer(minLength: 0)
-            }
-
-            Rectangle()
-                .fill(theme.subtlePanelStrokeColor)
-                .frame(height: 1)
-
-            UsageStatsTableView(rows: rows, theme: theme)
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            SettingsSmoothedRoundedRectangle(cornerRadius: 8)
-                .fill(Color.clear)
-        )
-        .overlay(
-            SettingsSmoothedRoundedRectangle(cornerRadius: 8)
-                .stroke(theme.subtlePanelStrokeColor, lineWidth: 1)
-        )
-    }
-
-    private var legend: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(Array(pieItems.prefix(6).enumerated()), id: \.element.id) { index, item in
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(pieColor(index, theme: theme))
-                        .frame(width: 6, height: 6)
-                    Text(item.title)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(usageText55)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Text(percentText(item.share))
-                        .font(AppFonts.numeric(size: 12, fallbackWeight: .semibold))
-                        .foregroundStyle(usageText55)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                }
-            }
-        }
-    }
-}
-
-private struct UsagePieChartView: View {
-    var items: [UsagePieItem]
-    var theme: SettingsTheme
-
-    var body: some View {
-        GeometryReader { proxy in
-            let side = min(proxy.size.width, proxy.size.height)
-            let ringFrame = max(28, side - 6)
-            let innerRatio = 0.62
-            let center = CGPoint(x: proxy.size.width / 2, y: proxy.size.height / 2)
-
-            ZStack {
-                if items.isEmpty {
-                    Circle()
-                        .stroke(
-                            theme.subtlePanelStrokeColor.opacity(0.60),
-                            style: StrokeStyle(lineWidth: max(16, side * 0.24), lineCap: .butt)
-                        )
-                        .frame(width: ringFrame, height: ringFrame)
-                        .position(center)
-                } else {
-                    let segments = ringSegments
-                    ForEach(Array(segments.enumerated()), id: \.element.id) { index, segment in
-                        UsageDonutSegmentShape(
-                            start: Angle(degrees: segment.startDegrees),
-                            end: Angle(degrees: segment.endDegrees),
-                            innerRatio: innerRatio
-                        )
-                        .fill(pieColor(index, theme: theme))
-                        .frame(width: ringFrame, height: ringFrame)
-                        .position(center)
-                    }
-
-                    Circle()
-                        .fill(theme.sectionFillColor)
-                        .frame(
-                            width: ringFrame * innerRatio + 2,
-                            height: ringFrame * innerRatio + 2
-                        )
-                        .position(center)
-                }
-            }
-        }
-    }
-
-    private var ringSegments: [UsageRingSegment] {
-        let visibleItems = items.filter { $0.share > 0 }
-        guard !visibleItems.isEmpty else { return [] }
-
-        let gap = visibleItems.count == 1 ? 0 : 1.5
-        let totalGap = min(Double(visibleItems.count) * gap, 24)
-        let availableDegrees = max(0, 360 - totalGap)
-        let totalShare = max(visibleItems.reduce(0) { $0 + max(0, $1.share) }, 0.0001)
-        let rawSegments = visibleItems.map { item in
-            (item: item, degrees: max(0, item.share / totalShare) * availableDegrees)
-        }
-        let minimumDegrees = visibleItems.count == 1 ? 0 : 4.0
-        let fixedDegrees = rawSegments.reduce(0) { partial, raw in
-            partial + (raw.degrees > 0 && raw.degrees < minimumDegrees ? minimumDegrees : 0)
-        }
-        let flexibleRawDegrees = rawSegments.reduce(0) { partial, raw in
-            partial + (raw.degrees >= minimumDegrees ? raw.degrees : 0)
-        }
-        let flexibleDegrees = max(0, availableDegrees - fixedDegrees)
-
-        var cursor = -90.0
-        return rawSegments.map { raw in
-            let degrees: Double
-            if raw.degrees > 0 && raw.degrees < minimumDegrees {
-                degrees = minimumDegrees
-            } else if flexibleRawDegrees > 0 {
-                degrees = raw.degrees / flexibleRawDegrees * flexibleDegrees
-            } else {
-                degrees = raw.degrees
-            }
-            let startDegrees = cursor + gap / 2
-            let endDegrees = startDegrees + degrees
-            cursor += degrees + gap
-            return UsageRingSegment(
-                id: raw.item.id,
-                startDegrees: startDegrees,
-                endDegrees: endDegrees
-            )
-        }
-    }
-}
-
-private struct UsageRingSegment: Identifiable {
-    var id: String
-    var startDegrees: Double
-    var endDegrees: Double
-}
-
-private struct UsageDonutSegmentShape: Shape {
-    var start: Angle
-    var end: Angle
-    var innerRatio: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        let center = CGPoint(x: rect.midX, y: rect.midY)
-        let outerRadius = min(rect.width, rect.height) / 2
-        let innerRadius = outerRadius * innerRatio
-        let startRadians = start.radians
-        let endRadians = end.radians
-
-        var path = Path()
-        path.move(to: point(center: center, radius: outerRadius, radians: startRadians))
-        path.addArc(
-            center: center,
-            radius: outerRadius,
-            startAngle: start,
-            endAngle: end,
-            clockwise: false
-        )
-        path.addLine(to: point(center: center, radius: innerRadius, radians: endRadians))
-        path.addArc(
-            center: center,
-            radius: innerRadius,
-            startAngle: end,
-            endAngle: start,
-            clockwise: true
-        )
-        path.closeSubpath()
-        return path
-    }
-
-    private func point(center: CGPoint, radius: CGFloat, radians: CGFloat) -> CGPoint {
-        CGPoint(
-            x: center.x + cos(radians) * radius,
-            y: center.y + sin(radians) * radius
-        )
-    }
-}
-
-private struct UsageStatsTableView: View {
-    var rows: [UsageStatsTableRow]
-    var theme: SettingsTheme
-    private let rateColumnWidth: CGFloat = 48
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                tableRow(row)
-                if index < rows.count - 1 {
-                    Rectangle()
-                        .fill(theme.subtlePanelStrokeColor)
-                        .frame(height: 1)
-                }
-            }
-            if rows.isEmpty {
-                Text("暂无匹配的使用数据")
-                    .font(.system(size: 12))
-                    .foregroundStyle(usageText55)
-                    .frame(maxWidth: .infinity, minHeight: 56, alignment: .center)
-            }
-        }
-    }
-
-    private func tableRow(_ row: UsageStatsTableRow) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(row.title)
-                .font(usagePingFangFont(size: 12, weight: .semibold))
-                .foregroundStyle(usageText80)
-                .lineLimit(1)
-                .truncationMode(.middle)
-
-            HStack(spacing: 24) {
-                compactMetric(title: "总Token", tokenText(row.totals.totalTokens))
-                compactMetric(title: "输入", tokenText(row.totals.inputTokens))
-                compactMetric(title: "输出", tokenText(row.totals.outputTokens))
-                compactMetric(title: "缓存命中", tokenText(row.totals.cacheReadTokens))
-                compactMetric(title: "缓存写入", tokenText(row.totals.cacheWriteTokens))
-                compactMetric(title: "缓存率", percentTextFixed(row.totals.cacheRate), fixedWidth: rateColumnWidth)
-                compactMetric(title: "成功率", percentTextFixed(row.totals.successRate), fixedWidth: rateColumnWidth)
-            }
-        }
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func compactMetric(
-        title: String,
-        _ value: String,
-        fixedWidth: CGFloat? = nil
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(usagePingFangFont(size: 10, weight: .regular))
-                .foregroundStyle(usageText40)
-                .lineLimit(1)
-            Text(value)
-                .font(AppFonts.numeric(size: 12, fallbackWeight: .bold))
-                .foregroundStyle(usageText80)
-                .lineLimit(1)
-                .minimumScaleFactor(0.76)
-        }
-        .frame(width: fixedWidth, alignment: .leading)
-        .frame(maxWidth: fixedWidth == nil ? .infinity : nil, alignment: .leading)
-    }
-}
-
-private func tokenText(_ value: Int) -> String {
+func tokenText(_ value: Int) -> String {
     let formatter = NumberFormatter()
     formatter.numberStyle = .decimal
     return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
@@ -670,10 +468,17 @@ private func tokenText(_ value: Int) -> String {
 
 private func costText(_ totals: UsageMetricTotals) -> String {
     let amount = String(format: "$%.2f", totals.estimatedCostUSD)
-    return totals.pricingState == .priced ? amount : "≥\(amount)"
+    switch totals.pricingState {
+    case .reported, .estimated, .mixed:
+        return amount
+    case .partial:
+        return "≥\(amount)"
+    case .unknown:
+        return "未知"
+    }
 }
 
-private func percentText(_ value: Double) -> String {
+func percentText(_ value: Double) -> String {
     let formatter = NumberFormatter()
     formatter.numberStyle = .percent
     formatter.minimumFractionDigits = 0
@@ -681,7 +486,7 @@ private func percentText(_ value: Double) -> String {
     return formatter.string(from: NSNumber(value: value)) ?? "0%"
 }
 
-private func percentTextFixed(_ value: Double) -> String {
+func percentTextFixed(_ value: Double) -> String {
     let formatter = NumberFormatter()
     formatter.numberStyle = .percent
     formatter.minimumFractionDigits = 1
@@ -699,7 +504,7 @@ private func usageTrendLabelFont(isActive: Bool) -> Font {
     usagePingFangFont(size: 10, weight: isActive ? .semibold : .regular)
 }
 
-private func usagePingFangFont(size: CGFloat, weight: Font.Weight) -> Font {
+func usagePingFangFont(size: CGFloat, weight: Font.Weight) -> Font {
     switch weight {
     case .semibold, .bold, .heavy, .black:
         return .custom("PingFangSC-Semibold", size: size)
@@ -731,7 +536,7 @@ private func trendTickLabel(_ date: Date, endAt: Date) -> String {
     return formatter.string(from: date)
 }
 
-private func pieColor(_ index: Int, theme: SettingsTheme) -> Color {
+func pieColor(_ index: Int, theme: SettingsTheme) -> Color {
     let colors = [0.82, 0.56, 0.40, 0.30, 0.18, 0.08].map {
         Color.white.opacity($0)
     }

@@ -14,6 +14,22 @@ final class AppConfigTests: XCTestCase {
         XCTAssertEqual(config.resourceMode, .background5Minutes)
         XCTAssertEqual(config.statusBarAppearanceMode, .followWallpaper)
         XCTAssertEqual(config.statusBarDisplayStyle, .iconPercent)
+        XCTAssertEqual(config.statusBarHistoryPeriod, .all)
+    }
+
+    func testDecodeStatusBarHistoryPeriodWhenPresent() throws {
+        let json = #"{"statusBarHistoryPeriod":"week","providers":[]}"#
+        let config = try JSONDecoder().decode(AppConfig.self, from: Data(json.utf8))
+
+        XCTAssertEqual(config.statusBarHistoryPeriod, .week)
+    }
+
+    func testDecodeUsageAnalyticsDisplayStylesWhenPresent() throws {
+        for style in [StatusBarDisplayStyle.usageTokens, .estimatedCost] {
+            let json = #"{"statusBarDisplayStyle":"\#(style.rawValue)","providers":[]}"#
+            let config = try JSONDecoder().decode(AppConfig.self, from: Data(json.utf8))
+            XCTAssertEqual(config.statusBarDisplayStyle, style)
+        }
     }
 
     func testDecodeResourceModeWhenPresent() throws {

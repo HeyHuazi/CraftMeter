@@ -3,6 +3,18 @@ import XCTest
 @testable import OhMyUsage
 
 final class StatusBarDisplayRendererTests: XCTestCase {
+    func testUsageAnalyticsStylesRenderAbsoluteValues() {
+        let entries = [
+            StatusBarDisplayEntry(icon: nil, name: "Today", valueText: "12.4K", percent: nil),
+            StatusBarDisplayEntry(icon: nil, name: "Week", valueText: "81.2K", percent: nil)
+        ]
+
+        for style in [StatusBarDisplayStyle.usageTokens, .estimatedCost] {
+            let rendered = StatusBarDisplayRenderer.attributedString(entries: entries, style: style)
+            XCTAssertGreaterThan(rendered.length, 0)
+        }
+    }
+
     func testIconPercentStyleUsesFixedInterGroupSpacingWithoutSeparator() {
         let entries = [
             StatusBarDisplayEntry(icon: testIcon(), name: "Codex", valueText: "78%", percent: 78),

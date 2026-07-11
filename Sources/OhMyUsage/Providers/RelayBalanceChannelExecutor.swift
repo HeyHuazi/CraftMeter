@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 Relay 凭据解析、恢复策略、HTTP 客户端与声明式 adapter 请求
+ * [OUTPUT]: 对外提供账户余额通道执行，并仅在非 browserOnly 模式持久化已验证凭据
+ * [POS]: Providers 的 Relay 余额执行器；隔离候选遍历、探测回退与提取流程，RelayProvider 仅负责编排
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import Foundation
 import OhMyUsageDomain
 
@@ -249,7 +255,8 @@ struct RelayBalanceChannelExecutor {
                         requestJSON: httpClient.requestJSON
                     )
 
-                    if let persisted = candidate.persistedCredential {
+                    if relayConfig.balanceCredentialMode != .browserOnly,
+                       let persisted = candidate.persistedCredential {
                         _ = credentialResolver.persistTokenCandidate(persisted, auth: relayConfig.balanceAuth)
                     }
                     extracted.rawMeta["savedCredentialSource"] = candidate.source
@@ -313,7 +320,8 @@ struct RelayBalanceChannelExecutor {
                     candidate: candidate
                 )
 
-                if let persisted = candidate.persistedCredential {
+                if relayConfig.balanceCredentialMode != .browserOnly,
+                   let persisted = candidate.persistedCredential {
                     _ = credentialResolver.persistTokenCandidate(persisted, auth: relayConfig.balanceAuth)
                 }
                 extracted.rawMeta["savedCredentialSource"] = candidate.source

@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 RelayAdapterRegistry、模板 manifest、新增站点草稿与 AppViewModel 配置动作
+ * [OUTPUT]: 对外提供 Relay 模板选择、字段推导、新增站点提交及浏览器验证后凭据落库触发
+ * [POS]: Settings 的 Relay 模板与新增流程支持层；模板规则来自 manifest，禁止复制站点特判
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import OhMyUsageDomain
 import SwiftUI
 
@@ -360,6 +366,12 @@ extension SettingsView {
         navigationState.selectedGroup = .thirdParty
         navigationState.selectedProviderID = added.id
         showingRelayNewSiteDraft = false
+
+        if newRelaySiteDraft.browserImportResult?.isReadyToSave == true {
+            Task {
+                _ = await viewModel.testRelayConnection(providerID: added.id)
+            }
+        }
 
         let templateID = newRelaySiteDraft.templateID
         newRelaySiteDraft.reset(using: templateID)

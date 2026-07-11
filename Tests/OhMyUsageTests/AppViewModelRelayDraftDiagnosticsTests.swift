@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor
 final class AppViewModelRelayDraftDiagnosticsTests: XCTestCase {
-    func testImportRelayDraftFromBrowserUsesBrowserPreferredCredentialMode() async {
+    func testImportRelayDraftFromBrowserUsesBrowserOnlyCredentialMode() async {
         var provider = ProviderDescriptor.makeOpenRelay(
             name: "Relay Import",
             baseURL: "https://relay-import.dev"
@@ -17,15 +17,22 @@ final class AppViewModelRelayDraftDiagnosticsTests: XCTestCase {
             providerFactory: RelayDraftDiagnosticsProviderFactory(
                 recorder: recorder,
                 snapshot: Self.sampleSnapshot(source: provider.id)
+            ),
+            browserCredentialService: BrowserCredentialService(
+                bearerCandidatesOverride: { _ in
+                    [BrowserDetectedCredential(value: "browser-token", source: "Auto:Test")]
+                }
             )
         )
-        let draft = RelaySettingsDraft(provider: provider)
+        var draft = RelaySettingsDraft(provider: provider)
+        draft.userID = "42"
 
         let result = await viewModel.importRelayDraftFromBrowser(draft)
 
-        XCTAssertTrue(result.success)
+        XCTAssertTrue(result.isReadyToSave)
+        XCTAssertEqual(result.discovery.nextAction, .verify)
         let descriptor = recorder.lastDescriptor()
-        XCTAssertEqual(descriptor?.relayConfig?.balanceCredentialMode, .browserPreferred)
+        XCTAssertEqual(descriptor?.relayConfig?.balanceCredentialMode, .browserOnly)
     }
 
     private static func sampleSnapshot(source: String) -> UsageSnapshot {

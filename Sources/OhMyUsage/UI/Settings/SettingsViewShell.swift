@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 SettingsView 的状态、展示模型、主题与各设置子页面能力
+ * [OUTPUT]: 为 SettingsView 提供根界面、侧边栏、内容路由及生命周期响应
+ * [POS]: UI/Settings 的工作台装配层，连接导航状态与具体设置页面
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import AppKit
 import SwiftUI
 
@@ -262,15 +268,6 @@ extension SettingsView {
             settingsOfficialSubscriptionsPage
         } customProviders: {
             settingsRelayProvidersPage
-        } donate: {
-            SettingsDonateView(
-                message: viewModel.localizedText(
-                    "如果 CraftMeter 帮到了你，可以请我喝杯咖啡，或者随手赞赏支持一下继续维护",
-                    "If CraftMeter has helped you, you can buy me a coffee or support continued maintenance."
-                ),
-                alipayAccessibilityLabel: viewModel.localizedText("支付宝赞赏二维码", "Alipay donation QR code"),
-                wechatAccessibilityLabel: viewModel.localizedText("微信赞赏二维码", "WeChat donation QR code")
-            )
         }
     }
 

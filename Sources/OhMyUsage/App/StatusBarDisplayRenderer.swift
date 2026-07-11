@@ -1,5 +1,12 @@
 import AppKit
 
+/**
+ * [INPUT]: 接收状态栏展示项、样式和前景色策略。
+ * [OUTPUT]: 对外提供稳定尺寸的 attributed title，并支持百分比项与纯文本绝对量项。
+ * [POS]: App 的最终菜单栏绘制器，不承担业务指标计算。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 struct StatusBarDisplayEntry {
     var icon: NSImage?
     var name: String
@@ -32,7 +39,7 @@ enum StatusBarDisplayRenderer {
         foregroundStyle: StatusBarForegroundStyle = .light
     ) -> NSAttributedString {
         switch style {
-        case .iconPercent:
+        case .iconPercent, .usageTokens, .estimatedCost:
             return IconPercentRenderer.attributedString(entries: entries, foregroundStyle: foregroundStyle)
         case .barNamePercent:
             return BarNamePercentRenderer.attributedString(entries: entries, foregroundStyle: foregroundStyle)
@@ -85,8 +92,9 @@ enum StatusBarDisplayRenderer {
                 .foregroundColor: foregroundStyle.color()
             ]
             let valueSize = StatusBarDisplayRenderer.ceilTextSize((valueText as NSString).size(withAttributes: valueAttributes))
+            let iconWidth = entry.icon == nil ? CGFloat(0) : iconSize.width + groupSpacing
             let size = NSSize(
-                width: iconSize.width + groupSpacing + valueSize.width,
+                width: iconWidth + valueSize.width,
                 height: entryHeight
             )
 
@@ -102,7 +110,7 @@ enum StatusBarDisplayRenderer {
                 valueText,
                 attributes: valueAttributes,
                 in: NSRect(
-                    x: iconSize.width + groupSpacing,
+                    x: iconWidth,
                     y: textBandYOffset,
                     width: valueSize.width,
                     height: entryHeight
@@ -179,8 +187,10 @@ enum StatusBarDisplayRenderer {
             let nameSize = StatusBarDisplayRenderer.ceilTextSize((nameText as NSString).size(withAttributes: nameAttributes))
             let valueSize = StatusBarDisplayRenderer.ceilTextSize((valueText as NSString).size(withAttributes: valueAttributes))
             let textWidth = max(nameSize.width, valueSize.width)
+            let drawsBar = entry.percent != nil
+            let barWidth = drawsBar ? barOuterSize.width + contentSpacing : 0
             let size = NSSize(
-                width: barOuterSize.width + contentSpacing + textWidth,
+                width: barWidth + textWidth,
                 height: barOuterSize.height
             )
 
@@ -188,37 +198,39 @@ enum StatusBarDisplayRenderer {
             image.lockFocus()
             defer { image.unlockFocus() }
 
-            let outerRect = NSRect(origin: .zero, size: barOuterSize)
-            let outerPath = NSBezierPath(
-                roundedRect: outerRect,
-                xRadius: barOuterCornerRadius,
-                yRadius: barOuterCornerRadius
-            )
-            barOuterColor(foregroundStyle).setFill()
-            outerPath.fill()
+            if drawsBar {
+                let outerRect = NSRect(origin: .zero, size: barOuterSize)
+                let outerPath = NSBezierPath(
+                    roundedRect: outerRect,
+                    xRadius: barOuterCornerRadius,
+                    yRadius: barOuterCornerRadius
+                )
+                barOuterColor(foregroundStyle).setFill()
+                outerPath.fill()
 
-            let fillHeight = barFillHeight(percent: entry.percent)
-            if fillHeight > 0 {
-                let fillRect = NSRect(
-                    x: barInnerOffsetX,
-                    y: barInnerOffsetY,
-                    width: barInnerWidth,
-                    height: fillHeight
-                )
-                let fillPath = NSBezierPath(
-                    roundedRect: fillRect,
-                    xRadius: barInnerCornerRadius,
-                    yRadius: barInnerCornerRadius
-                )
-                barInnerColor(foregroundStyle).setFill()
-                fillPath.fill()
+                let fillHeight = barFillHeight(percent: entry.percent)
+                if fillHeight > 0 {
+                    let fillRect = NSRect(
+                        x: barInnerOffsetX,
+                        y: barInnerOffsetY,
+                        width: barInnerWidth,
+                        height: fillHeight
+                    )
+                    let fillPath = NSBezierPath(
+                        roundedRect: fillRect,
+                        xRadius: barInnerCornerRadius,
+                        yRadius: barInnerCornerRadius
+                    )
+                    barInnerColor(foregroundStyle).setFill()
+                    fillPath.fill()
+                }
             }
 
             StatusBarDisplayRenderer.drawText(
                 nameText,
                 attributes: nameAttributes,
                 in: NSRect(
-                    x: barOuterSize.width + contentSpacing,
+                    x: barWidth,
                     y: 10 + textVerticalOffset,
                     width: textWidth,
                     height: 10
@@ -229,7 +241,7 @@ enum StatusBarDisplayRenderer {
                 valueText,
                 attributes: valueAttributes,
                 in: NSRect(
-                    x: barOuterSize.width + contentSpacing,
+                    x: barWidth,
                     y: textVerticalOffset,
                     width: textWidth,
                     height: 10

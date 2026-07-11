@@ -26,7 +26,7 @@ all targets <- OhMyUsage executable
 
 法则
 
-- target 之间只能按 `Package.swift` 单向依赖。
+- target 之间只能按 `Package.swift` 单向依赖，每个生产 target 必须维护自己的 `CLAUDE.md` L2 地图并由架构测试守护。
 - analytics contract 归 Application；文件 IO 归 executable Services。
 - Provider 网络协议与历史 analytics 是两条独立数据流。
 - 新 target 或目录增删必须同步本文件与根 CLAUDE.md。

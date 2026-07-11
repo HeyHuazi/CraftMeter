@@ -202,6 +202,10 @@ enum SettingsOverviewPresenter {
             return localizedText("图标 + 百分比", "Icon + percent")
         case .barNamePercent:
             return localizedText("柱状 + 名称", "Bar + name")
+        case .usageTokens:
+            return localizedText("使用额度", "Tokens used")
+        case .estimatedCost:
+            return localizedText("预估花费", "Estimated cost")
         }
     }
 

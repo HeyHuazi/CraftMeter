@@ -1,5 +1,12 @@
 import Foundation
 
+/**
+ * [INPUT]: 依赖 ProviderDescriptor、账户槽位标识、菜单栏外观、展示样式与历史周期枚举。
+ * [OUTPUT]: 对外提供 AppConfig、菜单栏展示/周期偏好及容错解码结果。
+ * [POS]: Models 的持久化配置边界，负责旧版本配置迁移与选择规范化。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 struct AppConfigDecodeDiagnostics: Equatable {
     var droppedProviderEntryCount: Int = 0
 
@@ -27,6 +34,7 @@ struct AppConfig: Codable, Equatable {
     var statusBarMultiProviderIDs: [String]
     var statusBarAppearanceMode: StatusBarAppearanceMode
     var statusBarDisplayStyle: StatusBarDisplayStyle
+    var statusBarHistoryPeriod: StatusBarHistoryPeriod
     var providers: [ProviderDescriptor]
 
     init(
@@ -41,6 +49,7 @@ struct AppConfig: Codable, Equatable {
         statusBarMultiProviderIDs: [String]? = nil,
         statusBarAppearanceMode: StatusBarAppearanceMode = .followWallpaper,
         statusBarDisplayStyle: StatusBarDisplayStyle = .iconPercent,
+        statusBarHistoryPeriod: StatusBarHistoryPeriod = .all,
         providers: [ProviderDescriptor]
     ) {
         let normalizedProviders = providers.map { $0.normalized() }
@@ -67,6 +76,7 @@ struct AppConfig: Codable, Equatable {
         )
         self.statusBarAppearanceMode = statusBarAppearanceMode
         self.statusBarDisplayStyle = statusBarDisplayStyle
+        self.statusBarHistoryPeriod = statusBarHistoryPeriod
         self.providers = normalizedProviders
     }
 
@@ -88,6 +98,7 @@ struct AppConfig: Codable, Equatable {
         case statusBarMultiProviderIDs
         case statusBarAppearanceMode
         case statusBarDisplayStyle
+        case statusBarHistoryPeriod
         case providers
     }
 
@@ -180,6 +191,8 @@ struct AppConfig: Codable, Equatable {
             ?? .followWallpaper
         let statusBarDisplayStyle = try container.decodeIfPresent(StatusBarDisplayStyle.self, forKey: .statusBarDisplayStyle)
             ?? .iconPercent
+        let statusBarHistoryPeriod = try container.decodeIfPresent(StatusBarHistoryPeriod.self, forKey: .statusBarHistoryPeriod)
+            ?? .all
 
         let config = AppConfig(
             language: language,
@@ -193,6 +206,7 @@ struct AppConfig: Codable, Equatable {
             statusBarMultiProviderIDs: decodedMultiProviderIDs,
             statusBarAppearanceMode: statusBarAppearanceMode,
             statusBarDisplayStyle: statusBarDisplayStyle,
+            statusBarHistoryPeriod: statusBarHistoryPeriod,
             providers: decodedProviders
         )
 

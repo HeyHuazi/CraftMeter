@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 SwiftUI 与 SettingsTab 导航状态，接收各设置页面的 ViewBuilder 内容
+ * [OUTPUT]: 对外提供按当前标签选择唯一设置页面的 SettingsTabContentView
+ * [POS]: UI/Settings 的内容路由器，不持有业务状态，只负责标签到页面的穷尽映射
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import SwiftUI
 
 struct SettingsTabContentView<
@@ -8,8 +14,7 @@ struct SettingsTabContentView<
     Permissions: View,
     LocalData: View,
     OfficialProviders: View,
-    CustomProviders: View,
-    Donate: View
+    CustomProviders: View
 >: View {
     var selectedTab: SettingsTab
     var overview: Overview
@@ -20,7 +25,6 @@ struct SettingsTabContentView<
     var localData: LocalData
     var officialProviders: OfficialProviders
     var customProviders: CustomProviders
-    var donate: Donate
 
     init(
         selectedTab: SettingsTab,
@@ -31,8 +35,7 @@ struct SettingsTabContentView<
         @ViewBuilder permissions: () -> Permissions,
         @ViewBuilder localData: () -> LocalData,
         @ViewBuilder officialProviders: () -> OfficialProviders,
-        @ViewBuilder customProviders: () -> CustomProviders,
-        @ViewBuilder donate: () -> Donate
+        @ViewBuilder customProviders: () -> CustomProviders
     ) {
         self.selectedTab = selectedTab
         self.overview = overview()
@@ -43,7 +46,6 @@ struct SettingsTabContentView<
         self.localData = localData()
         self.officialProviders = officialProviders()
         self.customProviders = customProviders()
-        self.donate = donate()
     }
 
     var body: some View {
@@ -64,8 +66,6 @@ struct SettingsTabContentView<
             officialProviders
         case .customProviders:
             customProviders
-        case .donate:
-            donate
         }
     }
 }

@@ -27,6 +27,7 @@ final class StatusBarController: NSObject {
         configureMenuPanel()
         startAppearanceObservation()
         viewModel.start()
+        viewModel.refreshMenuBarUsageAnalyticsIfNeeded(force: true)
         refreshStatusDisplay()
         statusBarAppearanceController.scheduleFollowUpRefreshes(
             mode: viewModel.statusBarAppearanceMode
@@ -61,6 +62,7 @@ final class StatusBarController: NSObject {
 
     private func refreshStatusDisplay() {
         guard let button = statusItemController.button else { return }
+        viewModel.refreshMenuBarUsageAnalyticsIfNeeded()
         let foregroundStyle = resolvedForegroundStyle(for: button.window?.screen)
         statusBarAppearanceController.updateRenderedForegroundStyle(foregroundStyle)
         let entries = statusDisplayEntries(foregroundStyle: foregroundStyle)
@@ -178,6 +180,17 @@ final class StatusBarController: NSObject {
     private func statusDisplayEntries(
         foregroundStyle: StatusBarForegroundStyle
     ) -> [StatusBarDisplayEntry] {
+        switch viewModel.statusBarDisplayStyle {
+        case .iconPercent, .barNamePercent:
+            return providerStatusDisplayEntries(foregroundStyle: foregroundStyle)
+        case .usageTokens, .estimatedCost:
+            return usageAnalyticsStatusDisplayEntries(foregroundStyle: foregroundStyle)
+        }
+    }
+
+    private func providerStatusDisplayEntries(
+        foregroundStyle: StatusBarForegroundStyle
+    ) -> [StatusBarDisplayEntry] {
         let codexActiveSnapshot = viewModel.codexSlotViewModels().first(where: { $0.isActive })?.snapshot
         let claudeDisplaySnapshot = viewModel.claudeStatusBarDisplaySnapshot()
         let sources = StatusBarDisplaySourceBuilder.displaySources(
@@ -199,6 +212,24 @@ final class StatusBarController: NSObject {
                 name: item.name,
                 valueText: item.valueText,
                 percent: item.percent
+            )
+        }
+    }
+
+    private func usageAnalyticsStatusDisplayEntries(
+        foregroundStyle: StatusBarForegroundStyle
+    ) -> [StatusBarDisplayEntry] {
+        MenuBarUsageMetricPresenter.presentations(
+            style: viewModel.statusBarDisplayStyle,
+            periodSelection: viewModel.statusBarHistoryPeriod,
+            summary: viewModel.menuBarUsageAnalyticsSummary,
+            language: viewModel.language
+        ).map { item in
+            StatusBarDisplayEntry(
+                icon: historyMetricImage(foregroundStyle: foregroundStyle),
+                name: item.name,
+                valueText: item.valueText,
+                percent: nil
             )
         }
     }
@@ -304,6 +335,23 @@ final class StatusBarController: NSObject {
 
     func showSettingsWindow() {
         SettingsWindowController.shared.show(viewModel: viewModel)
+    }
+
+    private func historyMetricImage(
+        foregroundStyle: StatusBarForegroundStyle
+    ) -> NSImage? {
+        guard let source = bundledImage(named: "menu_usage_analytics_icon", ext: "svg") else {
+            return nil
+        }
+        source.size = NSSize(width: statusIconSize, height: statusIconSize)
+        let image = NSImage(size: source.size)
+        image.lockFocus()
+        source.draw(in: NSRect(origin: .zero, size: source.size))
+        foregroundStyle.color().setFill()
+        NSRect(origin: .zero, size: source.size).fill(using: .sourceAtop)
+        image.unlockFocus()
+        image.isTemplate = false
+        return image
     }
 
     private func image(

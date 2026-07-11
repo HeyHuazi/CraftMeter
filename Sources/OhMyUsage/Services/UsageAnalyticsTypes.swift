@@ -9,6 +9,9 @@ import OhMyUsageApplication
  */
 
 typealias UsagePricingState = OhMyUsageApplication.UsagePricingState
+typealias UsageCostSource = OhMyUsageApplication.UsageCostSource
+typealias ModelPricingQuote = OhMyUsageApplication.ModelPricingQuote
+typealias UsageCostEstimator = OhMyUsageApplication.UsageCostEstimator
 typealias UsageMetricTotals = OhMyUsageApplication.UsageMetricTotals
 typealias UsageAnalyticsFilterMode = OhMyUsageApplication.UsageAnalyticsFilterMode
 typealias UsageAnalyticsRange = OhMyUsageApplication.UsageAnalyticsRange
@@ -22,6 +25,9 @@ typealias UsageTrendBucket = OhMyUsageApplication.UsageTrendBucket
 typealias UsageProviderCategoryStats = OhMyUsageApplication.UsageProviderCategoryStats
 typealias UsageProviderStats = OhMyUsageApplication.UsageProviderStats
 typealias UsageModelStats = OhMyUsageApplication.UsageModelStats
+typealias UsageAnalyticsDimensionOption = OhMyUsageApplication.UsageAnalyticsDimensionOption
+typealias UsageAnalyticsDimensionStats = OhMyUsageApplication.UsageAnalyticsDimensionStats
+typealias UsageAnalyticsFacetStatsGroup = OhMyUsageApplication.UsageAnalyticsFacetStatsGroup
 typealias UsageAnalyticsModelOption = OhMyUsageApplication.UsageAnalyticsModelOption
 typealias UsageAnalyticsSnapshot = OhMyUsageApplication.UsageAnalyticsSnapshot
 typealias UsageAnalyticsFileFingerprint = OhMyUsageApplication.UsageAnalyticsFileFingerprint

@@ -1,5 +1,12 @@
 import SwiftUI
 
+/**
+ * [INPUT]: 依赖 SettingsView 的视觉令牌与 AppViewModel 菜单栏配置 API。
+ * [OUTPUT]: 对外提供通用设置、菜单栏样式及历史统计配置区块。
+ * [POS]: UI/Settings 的常规偏好页面，实现用户配置但不直接持久化模型。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 extension SettingsView {
     var appBehaviorSection: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -129,10 +136,14 @@ extension SettingsView {
                     .padding(.leading, settingsMenuBarHintLeadingPadding)
             }
 
-            HStack(alignment: .center, spacing: 16) {
+            HStack(alignment: .top, spacing: 16) {
                 settingsMenuBarLabel(settingsStatusBarDisplayStyleTitle)
 
-                HStack(spacing: 8) {
+                LazyVGrid(
+                    columns: [GridItem(.fixed(240), spacing: 8), GridItem(.fixed(240), spacing: 8)],
+                    alignment: .leading,
+                    spacing: 8
+                ) {
                     menuBarStyleCard(
                         title: viewModel.localizedText("图标+百分比", "Icon + Percent"),
                         selected: viewModel.statusBarDisplayStyle == .iconPercent
@@ -150,9 +161,33 @@ extension SettingsView {
                     } action: {
                         viewModel.setStatusBarDisplayStyle(.barNamePercent)
                     }
+
+                    menuBarStyleCard(
+                        title: viewModel.localizedText("使用额度", "Tokens Used"),
+                        selected: viewModel.statusBarDisplayStyle == .usageTokens
+                    ) {
+                        usageTokensPreview
+                    } action: {
+                        viewModel.setStatusBarDisplayStyle(.usageTokens)
+                    }
+
+                    menuBarStyleCard(
+                        title: viewModel.localizedText("预估花费", "Estimated Cost"),
+                        selected: viewModel.statusBarDisplayStyle == .estimatedCost
+                    ) {
+                        estimatedCostPreview
+                    } action: {
+                        viewModel.setStatusBarDisplayStyle(.estimatedCost)
+                    }
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 102, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: 212, alignment: .leading)
+
+            if viewModel.usesStatusBarUsageAnalytics {
+                settingsMenuBarControlRow(title: settingsHistoryPeriodTitle) {
+                    statusBarHistoryPeriodSegmentControl
+                }
+            }
 
             VStack(alignment: .leading, spacing: 8) {
                 settingsMenuBarControlRow(title: settingsAppearanceModeTitle) {
@@ -250,7 +285,9 @@ extension SettingsView {
         SettingsPillSegmentedControl(
             options: [
                 SettingsPillSegmentOption(id: StatusBarDisplayStyle.iconPercent.id, title: settingsStatusBarStyleIconPercent),
-                SettingsPillSegmentOption(id: StatusBarDisplayStyle.barNamePercent.id, title: settingsStatusBarStyleBarNamePercent)
+                SettingsPillSegmentOption(id: StatusBarDisplayStyle.barNamePercent.id, title: settingsStatusBarStyleBarNamePercent),
+                SettingsPillSegmentOption(id: StatusBarDisplayStyle.usageTokens.id, title: viewModel.localizedText("使用额度", "Tokens")),
+                SettingsPillSegmentOption(id: StatusBarDisplayStyle.estimatedCost.id, title: viewModel.localizedText("预估花费", "Cost"))
             ],
             selection: viewModel.statusBarDisplayStyle.id,
             backgroundColor: Color.white.opacity(0.15),
@@ -262,7 +299,34 @@ extension SettingsView {
                 viewModel.setStatusBarDisplayStyle(style)
             }
         }
-        .frame(width: 180, height: 24)
+        .frame(width: 360, height: 24)
+    }
+
+    var statusBarHistoryPeriodSegmentControl: some View {
+        SettingsPillSegmentedControl(
+            options: [
+                SettingsPillSegmentOption(id: StatusBarHistoryPeriod.today.id, title: viewModel.localizedText("今日", "Today")),
+                SettingsPillSegmentOption(id: StatusBarHistoryPeriod.week.id, title: viewModel.localizedText("本周", "Week")),
+                SettingsPillSegmentOption(id: StatusBarHistoryPeriod.month.id, title: viewModel.localizedText("本月", "Month")),
+                SettingsPillSegmentOption(id: StatusBarHistoryPeriod.all.id, title: viewModel.localizedText("全部", "All"))
+            ],
+            selection: viewModel.statusBarHistoryPeriod.id,
+            backgroundColor: Color.white.opacity(0.15),
+            selectedFillColor: Color.white.opacity(0.82),
+            selectedTextColor: Color.black.opacity(0.88),
+            textColor: Color.white.opacity(0.78),
+            segmentWidths: [
+                StatusBarHistoryPeriod.today.id: 64,
+                StatusBarHistoryPeriod.week.id: 64,
+                StatusBarHistoryPeriod.month.id: 64,
+                StatusBarHistoryPeriod.all.id: 64
+            ]
+        ) { newValue in
+            if let period = StatusBarHistoryPeriod.allCases.first(where: { $0.id == newValue }) {
+                viewModel.setStatusBarHistoryPeriod(period)
+            }
+        }
+        .frame(width: 256, height: 24)
     }
 
     var refreshIntervalSegmentControl: some View {
@@ -297,6 +361,10 @@ extension SettingsView {
             statusBarDisplayStylePreviewIconPercent
         case .barNamePercent:
             statusBarDisplayStylePreviewBarNamePercent
+        case .usageTokens:
+            statusBarDisplayStylePreviewUsageTokens
+        case .estimatedCost:
+            statusBarDisplayStylePreviewEstimatedCost
         }
     }
 
@@ -391,6 +459,46 @@ extension SettingsView {
         .fixedSize(horizontal: true, vertical: false)
     }
 
+    var statusBarDisplayStylePreviewUsageTokens: some View {
+        historyDisplayStylePreview(
+            icon: "number.circle.fill",
+            values: ["12.4K", "81.2K", "3.2M"]
+        )
+    }
+
+    var statusBarDisplayStylePreviewEstimatedCost: some View {
+        historyDisplayStylePreview(
+            icon: "dollarsign.circle.fill",
+            values: ["$1.20", "$8.60", "≥$32.4"]
+        )
+    }
+
+    func historyDisplayStylePreview(icon: String, values: [String]) -> some View {
+        ZStack(alignment: .leading) {
+            SettingsSmoothedRoundedRectangle(cornerRadius: 12)
+                .fill(settingsUsesLightAppearance ? Color(hex: 0xF4F5F7) : Color.black)
+            SettingsSmoothedRoundedRectangle(cornerRadius: 12)
+                .stroke(settingsRowStrokeColor, lineWidth: 1)
+
+            HStack(spacing: 16) {
+                ForEach(Array(values.enumerated()), id: \.offset) { _, value in
+                    HStack(spacing: 4) {
+                        Image(systemName: icon)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(settingsBodyColor)
+                        Text(value)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(settingsBodyColor)
+                    }
+                    .fixedSize()
+                }
+            }
+            .padding(.horizontal, 24)
+        }
+        .frame(height: statusBarPreviewCardHeight, alignment: .leading)
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
     var languageSegmentControl: some View {
         SettingsPillSegmentedControl(
             options: [
@@ -463,6 +571,10 @@ extension SettingsView {
 
     var settingsStatusBarDisplayStyleTitle: String {
         viewModel.text(.statusBarDisplayStyle)
+    }
+
+    var settingsHistoryPeriodTitle: String {
+        viewModel.localizedText("统计周期", "Period")
     }
 
     var settingsAppearanceModeTitle: String {
@@ -619,6 +731,33 @@ extension SettingsView {
                     .scaledToFit()
                     .frame(width: 16, height: 16)
                     .opacity(0.8)
+            }
+
+            Text(value)
+                .font(AppFonts.numeric(size: 12, fallbackWeight: .bold))
+                .foregroundStyle(Color.white.opacity(0.80))
+        }
+        .frame(height: 16)
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    var usageTokensPreview: some View {
+        historyValuePreview(value: "3.2M")
+    }
+
+    var estimatedCostPreview: some View {
+        historyValuePreview(value: "≥$32.4")
+    }
+
+    func historyValuePreview(value: String) -> some View {
+        HStack(spacing: 5) {
+            if let image = bundledImage(named: "menu_usage_analytics_icon") {
+                Image(nsImage: image)
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(Color.white.opacity(0.80))
+                    .frame(width: 16, height: 16)
             }
 
             Text(value)

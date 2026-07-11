@@ -7,9 +7,12 @@ final class AppViewModelQuotaDisplayPreferenceTests: XCTestCase {
     func testUpdateOfficialQuotaDisplayModePostsStatusBarDisplayConfigNotification() {
         var codex = ProviderDescriptor.defaultOfficialCodex()
         codex.enabled = false
-        let viewModel = makeViewModel(providers: [codex])
+        let notificationCenter = NotificationCenter()
+        let viewModel = makeViewModel(providers: [codex], notificationCenter: notificationCenter)
 
         assertPostsStatusBarDisplayConfigNotification(
+            from: viewModel,
+            notificationCenter: notificationCenter,
             description: "Changing official usage preference should trigger status bar refresh notification"
         ) {
             viewModel.updateOfficialProviderSettings(
@@ -29,9 +32,12 @@ final class AppViewModelQuotaDisplayPreferenceTests: XCTestCase {
             baseURL: "https://quota-display-relay.test"
         )
         relay.enabled = false
-        let viewModel = makeViewModel(providers: [relay])
+        let notificationCenter = NotificationCenter()
+        let viewModel = makeViewModel(providers: [relay], notificationCenter: notificationCenter)
 
         assertPostsStatusBarDisplayConfigNotification(
+            from: viewModel,
+            notificationCenter: notificationCenter,
             description: "Changing third-party usage preference should trigger status bar refresh notification"
         ) {
             viewModel.updateThirdPartyQuotaDisplayMode(
@@ -47,9 +53,12 @@ final class AppViewModelQuotaDisplayPreferenceTests: XCTestCase {
         var mimo = ProviderDescriptor.defaultOfficialXiaomiMIMO()
         mimo.enabled = false
         mimo.relayConfig?.quotaDisplayMode = .used
-        let viewModel = makeViewModel(providers: [mimo])
+        let notificationCenter = NotificationCenter()
+        let viewModel = makeViewModel(providers: [mimo], notificationCenter: notificationCenter)
 
         assertPostsStatusBarDisplayConfigNotification(
+            from: viewModel,
+            notificationCenter: notificationCenter,
             description: "Changing official relay usage preference should trigger status bar refresh notification"
         ) {
             viewModel.updateThirdPartyQuotaDisplayMode(
@@ -65,9 +74,12 @@ final class AppViewModelQuotaDisplayPreferenceTests: XCTestCase {
     func testUpdateOfficialTraeValueDisplayModePostsStatusBarDisplayConfigNotification() {
         var trae = ProviderDescriptor.defaultOfficialTrae()
         trae.enabled = false
-        let viewModel = makeViewModel(providers: [trae])
+        let notificationCenter = NotificationCenter()
+        let viewModel = makeViewModel(providers: [trae], notificationCenter: notificationCenter)
 
         assertPostsStatusBarDisplayConfigNotification(
+            from: viewModel,
+            notificationCenter: notificationCenter,
             description: "Changing Trae value display mode should trigger status bar refresh notification"
         ) {
             viewModel.updateOfficialProviderSettings(
@@ -85,9 +97,12 @@ final class AppViewModelQuotaDisplayPreferenceTests: XCTestCase {
     func testSetShowOfficialAccountEmailPostsStatusBarDisplayConfigNotification() {
         var codex = ProviderDescriptor.defaultOfficialCodex()
         codex.enabled = false
-        let viewModel = makeViewModel(providers: [codex])
+        let notificationCenter = NotificationCenter()
+        let viewModel = makeViewModel(providers: [codex], notificationCenter: notificationCenter)
 
         assertPostsStatusBarDisplayConfigNotification(
+            from: viewModel,
+            notificationCenter: notificationCenter,
             description: "Changing show email toggle should trigger status bar refresh notification"
         ) {
             viewModel.setShowOfficialAccountEmailInMenuBar(true)
@@ -99,9 +114,12 @@ final class AppViewModelQuotaDisplayPreferenceTests: XCTestCase {
     func testSetShowOfficialPlanTypePostsStatusBarDisplayConfigNotification() {
         var codex = ProviderDescriptor.defaultOfficialCodex()
         codex.enabled = false
-        let viewModel = makeViewModel(providers: [codex])
+        let notificationCenter = NotificationCenter()
+        let viewModel = makeViewModel(providers: [codex], notificationCenter: notificationCenter)
 
         assertPostsStatusBarDisplayConfigNotification(
+            from: viewModel,
+            notificationCenter: notificationCenter,
             description: "Changing show plan type toggle should trigger status bar refresh notification"
         ) {
             viewModel.setShowOfficialPlanTypeInMenuBar(false, providerID: codex.id)
@@ -113,9 +131,12 @@ final class AppViewModelQuotaDisplayPreferenceTests: XCTestCase {
     func testSetShowExpirationTimePostsStatusBarDisplayConfigNotification() {
         var mimo = ProviderDescriptor.defaultOfficialXiaomiMIMO()
         mimo.enabled = false
-        let viewModel = makeViewModel(providers: [mimo])
+        let notificationCenter = NotificationCenter()
+        let viewModel = makeViewModel(providers: [mimo], notificationCenter: notificationCenter)
 
         assertPostsStatusBarDisplayConfigNotification(
+            from: viewModel,
+            notificationCenter: notificationCenter,
             description: "Changing expiration time toggle should trigger display config notification"
         ) {
             viewModel.setShowExpirationTimeInMenuBar(false, providerID: mimo.id)
@@ -128,9 +149,12 @@ final class AppViewModelQuotaDisplayPreferenceTests: XCTestCase {
     func testUpdateOfficialQuotaDisplayModeDoesNotPostWhenValueUnchanged() {
         var codex = ProviderDescriptor.defaultOfficialCodex()
         codex.enabled = false
-        let viewModel = makeViewModel(providers: [codex])
+        let notificationCenter = NotificationCenter()
+        let viewModel = makeViewModel(providers: [codex], notificationCenter: notificationCenter)
 
         assertDoesNotPostStatusBarDisplayConfigNotification(
+            from: viewModel,
+            notificationCenter: notificationCenter,
             description: "Unchanged official usage preference should not trigger status bar refresh notification"
         ) {
             viewModel.updateOfficialProviderSettings(
@@ -148,9 +172,12 @@ final class AppViewModelQuotaDisplayPreferenceTests: XCTestCase {
             baseURL: "https://quota-display-relay.test"
         )
         relay.enabled = false
-        let viewModel = makeViewModel(providers: [relay])
+        let notificationCenter = NotificationCenter()
+        let viewModel = makeViewModel(providers: [relay], notificationCenter: notificationCenter)
 
         assertDoesNotPostStatusBarDisplayConfigNotification(
+            from: viewModel,
+            notificationCenter: notificationCenter,
             description: "Unchanged third-party usage preference should not trigger status bar refresh notification"
         ) {
             viewModel.updateThirdPartyQuotaDisplayMode(
@@ -163,9 +190,12 @@ final class AppViewModelQuotaDisplayPreferenceTests: XCTestCase {
     func testSetShowOfficialAccountEmailDoesNotPostWhenValueUnchanged() {
         var codex = ProviderDescriptor.defaultOfficialCodex()
         codex.enabled = false
-        let viewModel = makeViewModel(providers: [codex])
+        let notificationCenter = NotificationCenter()
+        let viewModel = makeViewModel(providers: [codex], notificationCenter: notificationCenter)
 
         assertDoesNotPostStatusBarDisplayConfigNotification(
+            from: viewModel,
+            notificationCenter: notificationCenter,
             description: "Unchanged show email toggle should not trigger status bar refresh notification"
         ) {
             viewModel.setShowOfficialAccountEmailInMenuBar(false)
@@ -175,9 +205,12 @@ final class AppViewModelQuotaDisplayPreferenceTests: XCTestCase {
     func testSetShowOfficialPlanTypeDoesNotPostWhenValueUnchanged() {
         var codex = ProviderDescriptor.defaultOfficialCodex()
         codex.enabled = false
-        let viewModel = makeViewModel(providers: [codex])
+        let notificationCenter = NotificationCenter()
+        let viewModel = makeViewModel(providers: [codex], notificationCenter: notificationCenter)
 
         assertDoesNotPostStatusBarDisplayConfigNotification(
+            from: viewModel,
+            notificationCenter: notificationCenter,
             description: "Unchanged show plan type toggle should not trigger status bar refresh notification"
         ) {
             viewModel.setShowOfficialPlanTypeInMenuBar(true, providerID: codex.id)
@@ -187,9 +220,12 @@ final class AppViewModelQuotaDisplayPreferenceTests: XCTestCase {
     func testSetShowExpirationTimeDoesNotPostWhenValueUnchanged() {
         var mimo = ProviderDescriptor.defaultOfficialXiaomiMIMO()
         mimo.enabled = false
-        let viewModel = makeViewModel(providers: [mimo])
+        let notificationCenter = NotificationCenter()
+        let viewModel = makeViewModel(providers: [mimo], notificationCenter: notificationCenter)
 
         assertDoesNotPostStatusBarDisplayConfigNotification(
+            from: viewModel,
+            notificationCenter: notificationCenter,
             description: "Unchanged expiration time toggle should not trigger display config notification"
         ) {
             viewModel.setShowExpirationTimeInMenuBar(true, providerID: mimo.id)
@@ -199,9 +235,12 @@ final class AppViewModelQuotaDisplayPreferenceTests: XCTestCase {
     func testUpdateOfficialTraeValueDisplayModeDoesNotPostWhenValueUnchanged() {
         var trae = ProviderDescriptor.defaultOfficialTrae()
         trae.enabled = false
-        let viewModel = makeViewModel(providers: [trae])
+        let notificationCenter = NotificationCenter()
+        let viewModel = makeViewModel(providers: [trae], notificationCenter: notificationCenter)
 
         assertDoesNotPostStatusBarDisplayConfigNotification(
+            from: viewModel,
+            notificationCenter: notificationCenter,
             description: "Unchanged Trae value display mode should not trigger status bar refresh notification"
         ) {
             viewModel.updateOfficialProviderSettings(
@@ -220,9 +259,12 @@ final class AppViewModelQuotaDisplayPreferenceTests: XCTestCase {
             baseURL: "https://quota-display-relay.test"
         )
         relay.enabled = false
-        let viewModel = makeViewModel(providers: [relay])
+        let notificationCenter = NotificationCenter()
+        let viewModel = makeViewModel(providers: [relay], notificationCenter: notificationCenter)
 
         assertPostsStatusBarDisplayConfigNotification(
+            from: viewModel,
+            notificationCenter: notificationCenter,
             description: "Changing custom provider name should trigger status bar refresh notification"
         ) {
             updateRelaySettingsName(
@@ -241,9 +283,12 @@ final class AppViewModelQuotaDisplayPreferenceTests: XCTestCase {
             baseURL: "https://quota-display-relay.test"
         )
         relay.enabled = false
-        let viewModel = makeViewModel(providers: [relay])
+        let notificationCenter = NotificationCenter()
+        let viewModel = makeViewModel(providers: [relay], notificationCenter: notificationCenter)
 
         assertDoesNotPostStatusBarDisplayConfigNotification(
+            from: viewModel,
+            notificationCenter: notificationCenter,
             description: "Unchanged custom provider name should not trigger status bar refresh notification"
         ) {
             updateRelaySettingsName(
@@ -254,28 +299,34 @@ final class AppViewModelQuotaDisplayPreferenceTests: XCTestCase {
         }
     }
 
-    private func makeViewModel(providers: [ProviderDescriptor]) -> AppViewModel {
+    private func makeViewModel(
+        providers: [ProviderDescriptor],
+        notificationCenter: NotificationCenter
+    ) -> AppViewModel {
         AppViewModel(
             testingConfig: AppConfig(providers: providers),
-            appUpdateService: NoopAppUpdateService()
+            appUpdateService: NoopAppUpdateService(),
+            statusBarNotificationCenter: notificationCenter
         )
     }
 
     private func assertPostsStatusBarDisplayConfigNotification(
+        from viewModel: AppViewModel,
+        notificationCenter: NotificationCenter,
         description: String,
         timeout: TimeInterval = 1.0,
         perform: () -> Void
     ) {
         let expectation = expectation(description: description)
-        let observer = NotificationCenter.default.addObserver(
+        let observer = notificationCenter.addObserver(
             forName: AppViewModel.statusBarDisplayConfigDidChangeNotification,
-            object: nil,
+            object: viewModel,
             queue: nil
         ) { _ in
             expectation.fulfill()
         }
         defer {
-            NotificationCenter.default.removeObserver(observer)
+            notificationCenter.removeObserver(observer)
         }
 
         perform()
@@ -283,21 +334,23 @@ final class AppViewModelQuotaDisplayPreferenceTests: XCTestCase {
     }
 
     private func assertDoesNotPostStatusBarDisplayConfigNotification(
+        from viewModel: AppViewModel,
+        notificationCenter: NotificationCenter,
         description: String,
         timeout: TimeInterval = 0.2,
         perform: () -> Void
     ) {
         let expectation = expectation(description: description)
         expectation.isInverted = true
-        let observer = NotificationCenter.default.addObserver(
+        let observer = notificationCenter.addObserver(
             forName: AppViewModel.statusBarDisplayConfigDidChangeNotification,
-            object: nil,
+            object: viewModel,
             queue: nil
         ) { _ in
             expectation.fulfill()
         }
         defer {
-            NotificationCenter.default.removeObserver(observer)
+            notificationCenter.removeObserver(observer)
         }
 
         perform()

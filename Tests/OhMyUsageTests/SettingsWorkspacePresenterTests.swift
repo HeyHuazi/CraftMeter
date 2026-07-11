@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 XCTest 与 OhMyUsage 的 SettingsWorkspacePresenter
+ * [OUTPUT]: 验证设置页头文案和侧边栏结构的回归测试
+ * [POS]: Tests 的设置呈现契约测试，防止导航项与产品信息意外漂移
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import XCTest
 @testable import OhMyUsage
 
@@ -42,11 +48,11 @@ final class SettingsWorkspacePresenterTests: XCTestCase {
         XCTAssertEqual(presentation.sections.map(\.id), ["main"])
         XCTAssertEqual(
             presentation.sections[0].items.map(\.title),
-            ["Usage", "General", "Menubar", "Official", "Relay", "Buy me a coffee"]
+            ["Usage", "General", "Menubar", "Official", "Relay"]
         )
         XCTAssertEqual(
             presentation.sections[0].items.map(\.tab),
-            [.usageAnalytics, .general, .menuBar, .officialProviders, .customProviders, .donate]
+            [.usageAnalytics, .general, .menuBar, .officialProviders, .customProviders]
         )
         XCTAssertEqual(
             presentation.sections[0].items.map(\.icon),
@@ -55,17 +61,12 @@ final class SettingsWorkspacePresenterTests: XCTestCase {
                 "settings_sidebar_general_icon",
                 "settings_sidebar_menubar_icon",
                 "settings_sidebar_official_icon",
-                "settings_sidebar_relay_icon",
-                "settings_sidebar_donate_icon"
+                "settings_sidebar_relay_icon"
             ]
         )
         XCTAssertEqual(
             presentation.sections[0].items.first?.iconName(isSelected: true),
             "settings_sidebar_usage_icon_selected"
-        )
-        XCTAssertEqual(
-            presentation.sections[0].items.last?.iconName(isSelected: true),
-            "settings_sidebar_donate_icon_selected"
         )
     }
 

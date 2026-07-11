@@ -2,7 +2,7 @@ import Foundation
 
 /**
  * [INPUT]: Consumes normalized UsageAnalyticsRecord values and a composable analytics filter.
- * [OUTPUT]: Produces deterministic totals, trends, provider/model breakdowns, and selectable dimensions.
+ * [OUTPUT]: Produces deterministic totals, trends, provider/model breakdowns, selectable dimensions, and natural/all-period menu bar summaries.
  * [POS]: OhMyUsageApplication pure aggregation engine; contains no file IO or UI policy.
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -83,24 +83,27 @@ public enum UsageAnalyticsAggregator {
         }
     }
 
+    private struct NamedDimensionKey: Hashable {
+        var id: String
+        var title: String
+    }
+
+    private struct FacetKey: Hashable {
+        var kind: UsageAnalyticsFacetKind
+        var value: String
+        var title: String
+    }
+
     private struct SnapshotAccumulator {
         var totals = UsageMetricTotals()
-        var availableModelsByModel: [String: ModelOptionAccumulator] = [:]
         var categoryTotals: [String: UsageMetricTotals] = [:]
         var providerTotals: [ProviderKey: UsageMetricTotals] = [:]
         var modelGroups: [String: ModelGroup] = [:]
+        var clientTotals: [NamedDimensionKey: UsageMetricTotals] = [:]
+        var projectTotals: [NamedDimensionKey: UsageMetricTotals] = [:]
+        var facetTotals: [FacetKey: UsageMetricTotals] = [:]
         var firstEventAt: Date?
         var lastEventAt: Date?
-
-        mutating func addAvailableModel(_ record: UsageAnalyticsRecord) {
-            let key = modelKey(record.modelID)
-            if var item = availableModelsByModel[key] {
-                item.add(record)
-                availableModelsByModel[key] = item
-            } else {
-                availableModelsByModel[key] = ModelOptionAccumulator(record: record)
-            }
-        }
 
         mutating func addFilteredRecord(_ record: UsageAnalyticsRecord) {
             totals.add(record.totals)
@@ -119,6 +122,25 @@ public enum UsageAnalyticsAggregator {
                 modelGroups[modelGroupKey] = group
             } else {
                 modelGroups[modelGroupKey] = ModelGroup(record: record)
+            }
+
+            let clientKey = NamedDimensionKey(
+                id: dimensionKey(record.clientID),
+                title: displayValue(record.clientName)
+            )
+            clientTotals[clientKey, default: UsageMetricTotals()].add(record.totals)
+            let projectKey = NamedDimensionKey(
+                id: dimensionKey(record.projectID),
+                title: displayValue(record.projectName)
+            )
+            projectTotals[projectKey, default: UsageMetricTotals()].add(record.totals)
+            for facet in Set(record.facets) {
+                let facetKey = FacetKey(
+                    kind: facet.kind,
+                    value: dimensionKey(facet.value),
+                    title: displayValue(facet.displayName)
+                )
+                facetTotals[facetKey, default: UsageMetricTotals()].add(record.totals)
             }
 
             if firstEventAt == nil || record.eventAt < firstEventAt! {
@@ -150,20 +172,16 @@ public enum UsageAnalyticsAggregator {
         diagnostics: [String]
     ) -> UsageAnalyticsSnapshot {
         let interval = rangeInterval(filter.range, calendar: calendar, now: now)
-        let dedupedRecords = deduplicated(records, in: interval)
-        let selectedModelKey = selectedModelKey(for: filter)
+        let dedupedRecords = Array(deduplicated(records, in: interval).values)
+        let filteredRecords = dedupedRecords.filter { matchesFilter($0, filter: filter) }
         var accumulator = SnapshotAccumulator()
-        for record in dedupedRecords.values {
-            accumulator.addAvailableModel(record)
-            if matchesFilter(record, filter: filter, selectedModelKey: selectedModelKey) {
-                accumulator.addFilteredRecord(record)
-            }
+        for record in filteredRecords {
+            accumulator.addFilteredRecord(record)
         }
 
         let totals = accumulator.totals
         let buckets = trendBuckets(
-            from: dedupedRecords.values,
-            selectedModelKey: selectedModelKey,
+            from: filteredRecords,
             range: filter.range,
             firstEventAt: accumulator.firstEventAt,
             lastEventAt: accumulator.lastEventAt,
@@ -179,8 +197,54 @@ public enum UsageAnalyticsAggregator {
             providerCategoryStats: categoryStats(from: accumulator.categoryTotals, totalTokens: totals.totalTokens),
             providerStats: concreteProviderStats(from: accumulator.providerTotals, totalTokens: totals.totalTokens),
             modelStats: concreteModelStats(from: accumulator.modelGroups, totalTokens: totals.totalTokens),
-            availableModels: modelOptions(from: accumulator.availableModelsByModel),
+            clientStats: dimensionStats(from: accumulator.clientTotals, totalTokens: totals.totalTokens),
+            projectStats: dimensionStats(from: accumulator.projectTotals, totalTokens: totals.totalTokens),
+            facetStats: facetStats(from: accumulator.facetTotals, totalTokens: totals.totalTokens),
+            availableModels: modelOptions(from: optionRecords(dedupedRecords, filter: filter, excluding: .model)),
+            availableClients: dimensionOptions(from: optionRecords(dedupedRecords, filter: filter, excluding: .client), id: \.clientID, title: \.clientName),
+            availableProviders: dimensionOptions(from: optionRecords(dedupedRecords, filter: filter, excluding: .provider), id: \.providerID, title: \.providerName),
+            availableProjects: dimensionOptions(from: optionRecords(dedupedRecords, filter: filter, excluding: .project), id: \.projectID, title: \.projectName),
+            availableFacetValues: facetOptions(from: optionRecords(dedupedRecords, filter: filter, excluding: .facet), kind: filter.selectedFacetKind),
             diagnostics: diagnostics
+        )
+    }
+
+    public static func menuBarSummary(
+        records: [UsageAnalyticsRecord],
+        calendar: Calendar,
+        now: Date
+    ) -> UsageAnalyticsMenuBarSummary {
+        let monthInterval = calendar.dateInterval(of: .month, for: now)
+            ?? DateInterval(start: calendar.startOfDay(for: now), end: now)
+        let todayInterval = calendar.dateInterval(of: .day, for: now)
+            ?? DateInterval(start: calendar.startOfDay(for: now), end: now)
+        let weekInterval = calendar.dateInterval(of: .weekOfYear, for: now)
+            ?? todayInterval
+        let recordsByKey = deduplicated(records, in: DateInterval(start: .distantPast, end: now))
+        var todayTotals = UsageMetricTotals()
+        var weekTotals = UsageMetricTotals()
+        var monthTotals = UsageMetricTotals()
+        var allTotals = UsageMetricTotals()
+
+        for record in recordsByKey.values {
+            allTotals.add(record.totals)
+            if monthInterval.contains(record.eventAt) {
+                monthTotals.add(record.totals)
+            }
+            if weekInterval.contains(record.eventAt) {
+                weekTotals.add(record.totals)
+            }
+            if todayInterval.contains(record.eventAt) {
+                todayTotals.add(record.totals)
+            }
+        }
+
+        return UsageAnalyticsMenuBarSummary(
+            generatedAt: now,
+            today: UsageAnalyticsPeriodSummary(totals: todayTotals),
+            week: UsageAnalyticsPeriodSummary(totals: weekTotals),
+            month: UsageAnalyticsPeriodSummary(totals: monthTotals),
+            all: UsageAnalyticsPeriodSummary(totals: allTotals)
         )
     }
 
@@ -241,36 +305,53 @@ public enum UsageAnalyticsAggregator {
         return selected
     }
 
-    private static func selectedModelKey(for filter: UsageAnalyticsFilter) -> String? {
-        guard filter.mode == .byModel, let selectedModelID = filter.selectedModelID else {
-            return nil
-        }
-        return modelKey(selectedModelID)
+    private enum FilterDimension {
+        case client
+        case provider
+        case project
+        case model
+        case facet
     }
 
     private static func matchesFilter(
         _ record: UsageAnalyticsRecord,
         filter: UsageAnalyticsFilter,
-        selectedModelKey: String?
+        excluding excluded: FilterDimension? = nil
     ) -> Bool {
-        if let selectedModelKey, modelKey(record.modelID) != selectedModelKey {
+        if excluded != .model,
+           let selectedModelID = filter.selectedModelID,
+           modelKey(record.modelID) != modelKey(selectedModelID) {
             return false
         }
-        if !matchesDimension(record.clientID, selected: filter.selectedClientID) {
+        if excluded != .client,
+           !matchesDimension(record.clientID, selected: filter.selectedClientID) {
             return false
         }
-        if !matchesDimension(record.providerID, selected: filter.selectedProviderID) {
+        if excluded != .provider,
+           !matchesDimension(record.providerID, selected: filter.selectedProviderID) {
             return false
         }
-        return matchesDimension(record.projectID, selected: filter.selectedProjectID)
+        if excluded != .project,
+           !matchesDimension(record.projectID, selected: filter.selectedProjectID) {
+            return false
+        }
+        if excluded != .facet,
+           let kind = filter.selectedFacetKind,
+           let value = filter.selectedFacetValue,
+           !record.facets.contains(where: {
+               $0.kind == kind && dimensionKey($0.value) == dimensionKey(value)
+           }) {
+            return false
+        }
+        return true
     }
 
-    private static func matchesModelFilter(
-        _ record: UsageAnalyticsRecord,
-        selectedModelKey: String?
-    ) -> Bool {
-        guard let selectedModelKey else { return true }
-        return modelKey(record.modelID) == selectedModelKey
+    private static func optionRecords(
+        _ records: [UsageAnalyticsRecord],
+        filter: UsageAnalyticsFilter,
+        excluding dimension: FilterDimension
+    ) -> [UsageAnalyticsRecord] {
+        records.filter { matchesFilter($0, filter: filter, excluding: dimension) }
     }
 
     private static func matchesDimension(_ value: String, selected: String?) -> Bool {
@@ -278,10 +359,75 @@ public enum UsageAnalyticsAggregator {
         return modelKey(value) == modelKey(selected)
     }
 
+    private static func dimensionOptions(
+        from records: [UsageAnalyticsRecord],
+        id: KeyPath<UsageAnalyticsRecord, String>,
+        title: KeyPath<UsageAnalyticsRecord, String>
+    ) -> [UsageAnalyticsDimensionOption] {
+        var totals: [NamedDimensionKey: UsageMetricTotals] = [:]
+        for record in records {
+            let key = NamedDimensionKey(id: dimensionKey(record[keyPath: id]), title: displayValue(record[keyPath: title]))
+            totals[key, default: UsageMetricTotals()].add(record.totals)
+        }
+        return totals.map { key, value in
+            UsageAnalyticsDimensionOption(id: key.id, title: key.title, totalTokens: value.totalTokens, requestCount: value.requestCount)
+        }.sorted(by: optionSort)
+    }
+
+    private static func facetOptions(
+        from records: [UsageAnalyticsRecord],
+        kind: UsageAnalyticsFacetKind?
+    ) -> [UsageAnalyticsDimensionOption] {
+        guard let kind else { return [] }
+        var totals: [NamedDimensionKey: UsageMetricTotals] = [:]
+        for record in records {
+            for facet in Set(record.facets.filter { $0.kind == kind }) {
+                let key = NamedDimensionKey(id: dimensionKey(facet.value), title: displayValue(facet.displayName))
+                totals[key, default: UsageMetricTotals()].add(record.totals)
+            }
+        }
+        return totals.map { key, value in
+            UsageAnalyticsDimensionOption(id: key.id, title: key.title, totalTokens: value.totalTokens, requestCount: value.requestCount)
+        }.sorted(by: optionSort)
+    }
+
+    private static func dimensionStats(
+        from totals: [NamedDimensionKey: UsageMetricTotals],
+        totalTokens: Int
+    ) -> [UsageAnalyticsDimensionStats] {
+        totals.map { key, value in
+            UsageAnalyticsDimensionStats(id: key.id, title: key.title, totals: value, share: share(tokens: value.totalTokens, totalTokens: totalTokens))
+        }.sorted(by: dimensionStatsSort)
+    }
+
+    private static func facetStats(
+        from totals: [FacetKey: UsageMetricTotals],
+        totalTokens: Int
+    ) -> [UsageAnalyticsFacetStatsGroup] {
+        Dictionary(grouping: totals, by: { $0.key.kind }).map { kind, values in
+            UsageAnalyticsFacetStatsGroup(
+                kind: kind,
+                items: values.map { key, value in
+                    UsageAnalyticsDimensionStats(id: key.value, title: key.title, totals: value, share: share(tokens: value.totalTokens, totalTokens: totalTokens))
+                }.sorted(by: dimensionStatsSort)
+            )
+        }.sorted { $0.kind.rawValue < $1.kind.rawValue }
+    }
+
     private static func modelOptions(
-        from totalsByModel: [String: ModelOptionAccumulator]
+        from records: [UsageAnalyticsRecord]
     ) -> [UsageAnalyticsModelOption] {
-        totalsByModel.map { key, item in
+        var totalsByModel: [String: ModelOptionAccumulator] = [:]
+        for record in records {
+            let key = modelKey(record.modelID)
+            if var item = totalsByModel[key] {
+                item.add(record)
+                totalsByModel[key] = item
+            } else {
+                totalsByModel[key] = ModelOptionAccumulator(record: record)
+            }
+        }
+        return totalsByModel.map { key, item in
             UsageAnalyticsModelOption(id: key, title: item.title, totalTokens: item.totalTokens)
         }
         .sorted { lhs, rhs in
@@ -340,8 +486,7 @@ public enum UsageAnalyticsAggregator {
     }
 
     private static func trendBuckets(
-        from records: Dictionary<String, UsageAnalyticsRecord>.Values,
-        selectedModelKey: String?,
+        from records: [UsageAnalyticsRecord],
         range: UsageAnalyticsRange,
         firstEventAt: Date?,
         lastEventAt: Date?,
@@ -378,9 +523,6 @@ public enum UsageAnalyticsAggregator {
 
         var bucketsByStart: [Date: TrendBucketAccumulator] = [:]
         for record in records {
-            guard matchesModelFilter(record, selectedModelKey: selectedModelKey) else {
-                continue
-            }
             let bucketStart = trendBucketStart(
                 for: record.eventAt,
                 plan: plan,
@@ -557,8 +699,12 @@ public enum UsageAnalyticsAggregator {
         return Double(tokens) / Double(totalTokens)
     }
 
-    private static func modelKey(_ value: String) -> String {
+    private static func dimensionKey(_ value: String) -> String {
         displayValue(value).lowercased()
+    }
+
+    private static func modelKey(_ value: String) -> String {
+        dimensionKey(value)
     }
 
     private static func displayValue(_ value: String) -> String {
@@ -575,6 +721,20 @@ public enum UsageAnalyticsAggregator {
             return "unknown"
         }
         return multipleLabel
+    }
+
+    private static func dimensionStatsSort(lhs: UsageAnalyticsDimensionStats, rhs: UsageAnalyticsDimensionStats) -> Bool {
+        if lhs.totals.totalTokens == rhs.totals.totalTokens {
+            return lhs.title < rhs.title
+        }
+        return lhs.totals.totalTokens > rhs.totals.totalTokens
+    }
+
+    private static func optionSort(lhs: UsageAnalyticsDimensionOption, rhs: UsageAnalyticsDimensionOption) -> Bool {
+        if lhs.totalTokens == rhs.totalTokens {
+            return lhs.title < rhs.title
+        }
+        return lhs.totalTokens > rhs.totalTokens
     }
 
     private static func statsSort(lhs: UsageProviderCategoryStats, rhs: UsageProviderCategoryStats) -> Bool {

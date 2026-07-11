@@ -118,13 +118,16 @@ final class SettingsProviderConfigurationFacadeTests: XCTestCase {
             },
             importRelayDraftFromBrowser: {
                 importedDrafts.append($0)
-                return RelayDiagnosticResult(
-                    success: false,
-                    fetchHealth: .authExpired,
-                    resolvedAdapterID: $0.preferredAdapterID,
-                    resolvedAuthSource: nil,
-                    message: "missing",
-                    snapshotPreview: nil
+                return RelayBrowserImportResult(
+                    discovery: RelayBrowserImportDiscovery(
+                        host: "relay.example.com",
+                        adapterID: $0.preferredAdapterID,
+                        credentialSource: nil,
+                        credentialKind: nil,
+                        nextAction: .manualFallback,
+                        message: "missing"
+                    ),
+                    diagnostic: nil
                 )
             },
             updateThirdPartyQuotaDisplayMode: { providerID, mode in
@@ -145,7 +148,8 @@ final class SettingsProviderConfigurationFacadeTests: XCTestCase {
         XCTAssertEqual(testedDrafts.map(\.providerID), [provider.id])
         XCTAssertTrue(testResult.success)
         XCTAssertEqual(importedDrafts.map(\.providerID), [provider.id])
-        XCTAssertFalse(importResult.success)
+        XCTAssertEqual(importResult.discovery.nextAction, .manualFallback)
+        XCTAssertFalse(importResult.isReadyToSave)
         XCTAssertEqual(quotaDisplayMutations.map(\.0), [provider.id])
         XCTAssertEqual(quotaDisplayMutations.map(\.1), [.used])
         XCTAssertEqual(removedProviderIDs, [provider.id])
