@@ -1,59 +1,10 @@
-# Node / Vite
-node_modules/
-dist/
-.vite/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# Tauri / Rust
-src-tauri/target/
-src-tauri/gen/
-**/*.rs.bk
-Cargo.lock.orig
-
-# Swift legacy build leftovers
-.build/
-.swiftpm/
-Package.resolved
-DerivedData/
-*.xcodeproj/project.xcworkspace/xcuserdata/
-*.xcworkspace/xcuserdata/
-*.xcuserstate
-*.dSYM/
-
-# Generated local snapshots
-public/dev-dashboard.json
-
-# Local agent state / internal memory
-.claude/
-CLAUDE.md
-**/CLAUDE.md
-
-# Logs / temporary files
-*.log
-*.tmp
-*.swp
-*.swo
-
-# Local environment
-.env
-.env.*
-
-# macOS
 .DS_Store
-.history/
-claude-design-files/
-
-# Release artifacts stay in GitHub Releases, not Git history
-*.dmg
-*.app
-*.pkg
-*.msi
-*.exe
-*.AppImage
-*.deb
-*.rpm
-*.tar.gz
-*.zip
+/.build
+/dist
+/Packages
+xcuserdata/
+DerivedData/
+.swiftpm/configuration/registries.json
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.netrc
+.codex/

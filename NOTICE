@@ -1,0 +1,19 @@
+CraftMeter Third-Party Notices
+==============================
+
+This project is derived in substantial part from:
+
+  oh-myusage
+  https://github.com/Four-JJJJ/oh-myusage
+  Imported baseline: v2.2.2
+  Commit: 46f0ca716348b9311dbfcde21cc7979a37a700eb
+
+Copyright (c) 2026 FourJ
+
+The upstream project is licensed under the MIT License. Its copyright and
+permission notice are preserved in this repository's LICENSE file.
+
+CraftMeter-specific additions include local analytics semantics migrated from
+the historical CraftMeter implementation, with extended support for Craft
+Agents, Gemini CLI, Qwen Code, reasoning tokens, cost state, projects, MCP,
+Skills, and typed attribution facets.

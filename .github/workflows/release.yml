@@ -3,11 +3,11 @@ name: Release
 on:
   push:
     tags:
-      - "v*.*.*"
+      - "v*"
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Release tag, for example v1.0.0"
+      version:
+        description: "Version to build and release, for example 1.1.2 or v1.1.2"
         required: true
         type: string
 
@@ -15,53 +15,224 @@ permissions:
   contents: write
 
 jobs:
-  macos-release:
-    name: Build macOS release
+  build-and-release:
     runs-on: macos-latest
+
     env:
-      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      TAG_NAME: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      INPUT_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Swift
+        uses: swift-actions/setup-swift@v2
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          swift-version: "6.2.0"
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Build frontend
-        run: npm run build
-
-      - name: Test Rust backend
-        run: npm run test:rust
-
-      - name: Build Tauri bundles
-        run: npm run tauri:build
-
-      - name: Create checksums
+      - name: Resolve version
+        id: version
         shell: bash
         run: |
-          cd src-tauri/target/release/bundle
-          find . -type f \( -name "*.dmg" -o -name "*.app.tar.gz" -o -name "*.zip" \) -print0 \
-            | sort -z \
-            | xargs -0 shasum -a 256 > checksums.txt
+          set -euo pipefail
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: CraftMeter ${{ env.RELEASE_TAG }}
-          generate_release_notes: true
-          files: |
-            src-tauri/target/release/bundle/dmg/*.dmg
-            src-tauri/target/release/bundle/checksums.txt
+          TAG="${TAG_NAME:-}"
+          INPUT_VERSION="${INPUT_VERSION:-}"
+
+          if [[ -n "$INPUT_VERSION" ]]; then
+            TAG="$INPUT_VERSION"
+          elif [[ -z "$TAG" ]]; then
+            echo "No version was provided by tag or workflow input." >&2
+            exit 1
+          fi
+
+          if [[ "$TAG" != v* ]]; then
+            TAG="v$TAG"
+          fi
+
+          VERSION="${TAG#v}"
+
+          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,3}$ ]]; then
+            echo "Invalid version: $VERSION" >&2
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Sync VERSION file
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' "${{ steps.version.outputs.version }}" > VERSION
+
+      - name: Validate release repository
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          EXPECTED_REPOSITORY="HeyHuazi/CraftMeter"
+          if [[ "${{ github.repository }}" != "$EXPECTED_REPOSITORY" ]]; then
+            echo "Release workflow must run from $EXPECTED_REPOSITORY, got ${{ github.repository }}." >&2
+            exit 1
+          fi
+
+      - name: Build release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_VERSION="${{ steps.version.outputs.version }}" ./scripts/package_dmg.sh
+
+      - name: Generate update manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${{ steps.version.outputs.tag }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          REPO="${{ github.repository }}"
+          RELEASE_URL="https://github.com/$REPO/releases/tag/$TAG"
+          ZIP_NAME="CraftMeter-macOS.zip"
+          DMG_NAME="CraftMeter.dmg"
+          ZIP_SHA="$(shasum -a 256 "dist/$ZIP_NAME" | awk '{print $1}')"
+          DMG_SHA="$(shasum -a 256 "dist/$DMG_NAME" | awk '{print $1}')"
+          ZIP_SIZE="$(stat -f%z "dist/$ZIP_NAME")"
+          DMG_SIZE="$(stat -f%z "dist/$DMG_NAME")"
+          PUBLISHED_AT="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+          cat > dist/latest.json <<JSON
+          {
+            "version": "$VERSION",
+            "pub_date": "$PUBLISHED_AT",
+            "release_url": "$RELEASE_URL",
+            "notes_url": "$RELEASE_URL",
+            "assets": {
+              "macos_zip": {
+                "url": "https://github.com/$REPO/releases/download/$TAG/$ZIP_NAME",
+                "sha256": "$ZIP_SHA",
+                "size": $ZIP_SIZE
+              },
+              "macos_dmg": {
+                "url": "https://github.com/$REPO/releases/download/$TAG/$DMG_NAME",
+                "sha256": "$DMG_SHA",
+                "size": $DMG_SIZE
+              }
+            }
+          }
+          JSON
+
+      - name: Validate update manifest
+        env:
+          EXPECTED_TAG: ${{ steps.version.outputs.tag }}
+          EXPECTED_VERSION: ${{ steps.version.outputs.version }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          manifest = json.loads(Path("dist/latest.json").read_text(encoding="utf-8"))
+          tag = os.environ["EXPECTED_TAG"]
+          version = os.environ["EXPECTED_VERSION"]
+          repository = os.environ["EXPECTED_REPOSITORY"]
+          release_url = f"https://github.com/{repository}/releases/tag/{tag}"
+          expected_assets = {
+              "macos_zip": f"https://github.com/{repository}/releases/download/{tag}/CraftMeter-macOS.zip",
+              "macos_dmg": f"https://github.com/{repository}/releases/download/{tag}/CraftMeter.dmg",
+          }
+          sha256_pattern = re.compile(r"^[0-9a-f]{64}$")
+          pub_date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit(message)
+
+          require(manifest.get("version") == version, "latest.json version does not match release version")
+          require(pub_date_pattern.fullmatch(manifest.get("pub_date", "")), "latest.json pub_date must be UTC ISO-8601")
+          require(manifest.get("release_url") == release_url, "latest.json release_url does not match release")
+          require(manifest.get("notes_url") == release_url, "latest.json notes_url does not match release")
+
+          assets = manifest.get("assets")
+          require(isinstance(assets, dict), "latest.json assets must be an object")
+          for key, expected_url in expected_assets.items():
+              asset = assets.get(key)
+              require(isinstance(asset, dict), f"latest.json assets.{key} must be an object")
+              require(asset.get("url") == expected_url, f"latest.json assets.{key}.url does not match release asset")
+              require(sha256_pattern.fullmatch(asset.get("sha256", "")), f"latest.json assets.{key}.sha256 must be 64 lowercase hex chars")
+              require(isinstance(asset.get("size"), int) and asset["size"] > 0, f"latest.json assets.{key}.size must be positive")
+          PY
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG="${{ steps.version.outputs.tag }}"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/latest.json "dist/CraftMeter.dmg" dist/CraftMeter-macOS.zip --clobber
+          else
+            gh release create "$TAG" \
+              dist/latest.json \
+              "dist/CraftMeter.dmg" \
+              dist/CraftMeter-macOS.zip \
+              --title "$TAG" \
+              --generate-notes
+          fi
+
+      - name: Validate published update endpoints
+        env:
+          EXPECTED_VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import json
+          import os
+          import time
+          import urllib.request
+
+          expected_version = os.environ["EXPECTED_VERSION"]
+          endpoints = {
+              "current": "https://github.com/HeyHuazi/CraftMeter/releases/latest/download/latest.json",
+          }
+
+          for label, url in endpoints.items():
+              last_error = None
+              for attempt in range(1, 7):
+                  try:
+                      request = urllib.request.Request(
+                          url,
+                          headers={
+                              "Accept": "application/json",
+                              "User-Agent": "CraftMeterReleaseValidator",
+                          },
+                      )
+                      with urllib.request.urlopen(request, timeout=20) as response:
+                          payload = response.read()
+                      manifest = json.loads(payload.decode("utf-8"))
+                      actual_version = manifest.get("version")
+                      if actual_version == expected_version:
+                          break
+                      last_error = (
+                          f"{label} endpoint returned version {actual_version!r}; "
+                          f"expected {expected_version!r}"
+                      )
+                  except Exception as error:
+                      last_error = str(error)
+
+                  if attempt == 6:
+                      raise SystemExit(
+                          f"Published update endpoint validation failed for {label}: {last_error}"
+                      )
+                  time.sleep(5)
+          PY

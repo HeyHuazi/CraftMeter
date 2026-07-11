@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - "**"
   pull_request:
-    branches: [main]
 
 jobs:
   build-and-test:
@@ -14,20 +14,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Setup Swift
+        uses: swift-actions/setup-swift@v2
         with:
-          node-version: 20
-          cache: npm
+          swift-version: "6.2.0"
 
-      - name: Install frontend dependencies
-        run: npm ci
+      - name: Build
+        run: swift build
 
-      - name: Build frontend
-        run: npm run build
-
-      - name: Check Rust backend
-        run: cargo check --manifest-path src-tauri/Cargo.toml
-
-      - name: Test Rust backend
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Test
+        run: swift test
