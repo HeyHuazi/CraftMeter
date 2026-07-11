@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 APP_NAME="CraftMeter"
 EXECUTABLE_NAME="CraftMeter"
+SWIFTPM_RESOURCE_TARGET="OhMyUsage"
 BUNDLE_ID="com.heyhuazi.craftmeter.app"
 DIST_DIR="$ROOT_DIR/dist"
 TMP_ROOT="$(mktemp -d /tmp/aibm_pkg.XXXXXX)"
@@ -176,11 +177,14 @@ copy_support_files() {
   local products_dir="$1"
   mkdir -p "$RES_DIR" "$FRAMEWORKS_DIR"
 
-  local resource_bundle="$products_dir/${EXECUTABLE_NAME}_${EXECUTABLE_NAME}.bundle"
-  if [[ -d "$resource_bundle" ]]; then
-    log "Copying SwiftPM resource bundle"
-    cp -R "$resource_bundle" "$RES_DIR/"
-  fi
+  # SwiftPM resource bundles use <package>_<target>.bundle, not the executable product name twice.
+  # Bundle.module asserts at runtime when this bundle is absent, so packaging must fail closed.
+  local resource_bundle="$products_dir/${APP_NAME}_${SWIFTPM_RESOURCE_TARGET}.bundle"
+  [[ -d "$resource_bundle" ]] || \
+    die "SwiftPM resource bundle not found at: $resource_bundle"
+
+  log "Copying SwiftPM resource bundle: $(basename "$resource_bundle")"
+  cp -R "$resource_bundle" "$RES_DIR/"
 
   local package_frameworks="$products_dir/PackageFrameworks"
   if [[ -d "$package_frameworks" ]]; then

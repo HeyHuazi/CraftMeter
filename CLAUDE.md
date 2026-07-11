@@ -18,7 +18,7 @@ LICENSE - 上游 MIT 许可证与版权声明
 NOTICE - oh-myusage 导入基线与 CraftMeter 派生说明
 README.md - 产品能力、隐私和构建入口
 docs/ARCHITECTURE.md - 额度流、历史 analytics、首次启动与分发模式的权威设计
-scripts/package_dmg.sh - development/preview/release 三态 DMG/ZIP 构建、签名与公证入口
+scripts/package_dmg.sh - development/preview/release 三态 DMG/ZIP 构建、SwiftPM 资源完整性门禁、签名与公证入口
 </config>
 
 ## 架构法则
