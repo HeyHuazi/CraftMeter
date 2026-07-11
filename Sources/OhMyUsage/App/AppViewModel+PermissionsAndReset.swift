@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 AppKit 系统设置入口、权限协调器、重置协调器及各持久化 store
+ * [OUTPUT]: 为 AppViewModel 提供权限操作、状态刷新与完整本地数据重置能力
+ * [POS]: App 模块的权限/重置适配层，只编排既有服务，不承载底层存储实现
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import AppKit
 import Foundation
 import UserNotifications
@@ -100,6 +106,7 @@ extension AppViewModel {
                 },
                 resetPersistentState: {
                     self.launchAtLoginService.reset()
+                    FirstLaunchExperienceStore().reset()
                     self.credentialAccessService.resetAllStoredCredentials()
                     self.codexProfileStore.reset()
                     self.codexSlotStore.reset()

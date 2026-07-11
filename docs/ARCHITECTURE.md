@@ -118,7 +118,32 @@ Craft Agents 日志若带 `costCents`，直接转为 USD；其他本地来源在
 - Keychain 从 `oh-myusage` / `OhMyUsage` 单向迁移到 `craftmeter`。
 - LaunchAgent 使用 `com.heyhuazi.craftmeter.app.launchatlogin`。
 
-## 9. 隐私不变量
+## 9. 首次启动与可见性
+
+CraftMeter 使用 `LSUIElement` 与 accessory activation policy，是菜单栏应用而不是常规 Dock 应用。
+
+启动顺序：
+
+1. 获取单实例锁。
+2. 创建 `StatusBarController` 并启动运行时。
+3. 优先展示待处理的更新说明。
+4. 若没有更新说明且当前首次启动体验版本未完成，则打开设置窗口一次。
+5. 后续启动仅驻留菜单栏；再次启动已有实例会激活设置窗口。
+
+`FirstLaunchExperienceStore` 只保存已完成的体验版本整数。提升版本可为既有用户重新展示必要的启动说明，而无需污染 `AppViewModel`。
+
+## 10. 分发模式
+
+`scripts/package_dmg.sh` 明确区分：
+
+- `development`：本地开发，允许 ad-hoc 签名。
+- `preview`：公开但未公证的 Preview，允许 ad-hoc 签名并必须披露 Gatekeeper 限制。
+- `release`：正式分发，强制 Developer ID 签名和 Apple 公证；缺少凭据立即失败。
+
+当前 GitHub Actions 使用 `preview`。未来取得 Apple Developer 凭据后，只切换模式并注入签名/公证变量，不改变应用架构或 bundle identity。
+
+
+## 11. 隐私不变量
 
 禁止进入 analytics model/cache：
 

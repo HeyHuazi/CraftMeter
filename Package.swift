@@ -62,7 +62,7 @@ let package = Package(
                 "OhMyUsageFeatures",
                 "OhMyUsageBootstrap"
             ],
-            exclude: ["Services/CLAUDE.md"],
+            exclude: ["App/CLAUDE.md", "Services/CLAUDE.md"],
             resources: [
                 .process("Resources")
             ]

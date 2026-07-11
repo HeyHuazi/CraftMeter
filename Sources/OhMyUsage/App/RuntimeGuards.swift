@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 AppKit 应用生命周期、StatusBarController、首次启动状态与更新说明状态存储
+ * [OUTPUT]: 对外提供单实例锁与 AppLifecycleDelegate，完成菜单栏运行时启动及首次可见反馈
+ * [POS]: App 模块的进程入口守卫，连接系统生命周期与 CraftMeter 窗口/菜单栏控制器
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import AppKit
 import Foundation
 
@@ -56,6 +62,7 @@ final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
     private var statusBarController: StatusBarController?
     private var activationObserver: NSObjectProtocol?
     private let postUpdateReleaseNotesStore: any PostUpdateReleaseNotesStoring = PostUpdateReleaseNotesStore()
+    private let firstLaunchExperienceStore: any FirstLaunchExperienceStoring = FirstLaunchExperienceStore()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Ensure app stays menu-bar only even if started from terminal context.
@@ -72,7 +79,9 @@ final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
         startActivationBridgeObservation()
         let viewModel = AppViewModel()
         statusBarController = StatusBarController(viewModel: viewModel)
-        presentPostUpdateReleaseNotesIfNeeded(currentVersion: viewModel.currentAppVersion)
+        if !presentPostUpdateReleaseNotesIfNeeded(currentVersion: viewModel.currentAppVersion) {
+            presentFirstLaunchExperienceIfNeeded()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -109,15 +118,30 @@ final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
     }
 
     @MainActor
-    private func presentPostUpdateReleaseNotesIfNeeded(currentVersion: String) {
+    @discardableResult
+    private func presentPostUpdateReleaseNotesIfNeeded(currentVersion: String) -> Bool {
         guard let releaseNotes = postUpdateReleaseNotesStore.consumePresentationIfNeeded(
             currentVersion: currentVersion
         ) else {
-            return
+            return false
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
             ReleaseNotesWindowController.shared.show(releaseNotes: releaseNotes)
+        }
+        return true
+    }
+
+    @MainActor
+    private func presentFirstLaunchExperienceIfNeeded() {
+        guard firstLaunchExperienceStore.consumePresentationIfNeeded(
+            currentVersion: FirstLaunchExperienceStore.currentExperienceVersion
+        ) else {
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+            self?.statusBarController?.showSettingsWindow()
         }
     }
 }

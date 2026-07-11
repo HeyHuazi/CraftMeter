@@ -26,6 +26,7 @@ ICNS_PATH="$TMP_ROOT/AppIcon.icns"
 INSTALL_GUIDE_PATH="$DMG_STAGING/$INSTALL_GUIDE_NAME"
 VERSION_FILE="$ROOT_DIR/VERSION"
 APP_VERSION="${APP_VERSION:-}"
+PACKAGE_MODE="${PACKAGE_MODE:-development}"
 
 if [[ -z "$APP_VERSION" && -f "$VERSION_FILE" ]]; then
   APP_VERSION="$(tr -d '[:space:]' < "$VERSION_FILE")"
@@ -126,6 +127,27 @@ sign_mode() {
   else
     echo "ad-hoc"
   fi
+}
+
+validate_package_mode() {
+  case "$PACKAGE_MODE" in
+    development)
+      ;;
+    preview)
+      if [[ -z "$(signing_identity)" ]]; then
+        warn "Building an ad-hoc signed, non-notarized Preview package"
+      fi
+      ;;
+    release)
+      [[ -n "$(signing_identity)" ]] || \
+        die "release mode requires DEVELOPER_ID_APPLICATION or CODESIGN_IDENTITY"
+      should_notarize || \
+        die "release mode requires notarization credentials and NOTARIZE_DMG=true (or automatic notarization)"
+      ;;
+    *)
+      die "unknown PACKAGE_MODE '$PACKAGE_MODE'; expected development, preview, or release"
+      ;;
+  esac
 }
 
 resolve_binary_path() {
@@ -269,16 +291,70 @@ staple_artifact() {
 
 prepare_install_guide() {
   cat > "$INSTALL_GUIDE_PATH" <<EOF
-${APP_NAME} 安装说明
+${APP_NAME} Preview 安装与首次启动说明
+====================================
 
-1. 将 “${APP_NAME}.app” 拖到 “Applications” 文件夹。
-2. 第一次打开时，请前往“应用程序”文件夹，右键 ${APP_NAME}，选择“打开”。
-3. 如果系统仍然拦截：
-   打开“系统设置” -> “隐私与安全性” -> 找到 ${APP_NAME} -> 点击“仍要打开”。
+重要说明
+--------
+当前 GitHub Preview 未经 Apple Developer ID 签名和 Apple 公证。
+从浏览器下载后，macOS Gatekeeper 可能阻止首次双击启动；这表示系统无法验证发布者身份。
 
-说明：
-- 这是 GitHub 开源分发版本，可能会被 macOS Gatekeeper 首次拦截。
-- 完成一次“右键打开”后，后续通常可以正常启动。
+请仅从官方地址下载：
+https://github.com/HeyHuazi/CraftMeter/releases
+
+系统要求
+--------
+macOS 14 Sonoma 或更高版本。
+
+安装步骤
+--------
+1. 将“${APP_NAME}.app”拖入“Applications”文件夹。
+2. 打开 Finder，进入“应用程序”。
+3. 按住 Control 点击或右键点击 ${APP_NAME}。
+4. 选择“打开”，并在随后出现的对话框中再次选择“打开”。
+
+如果没有“打开”按钮
+------------------
+1. 尝试启动一次 ${APP_NAME}。
+2. 打开“系统设置” -> “隐私与安全性”。
+3. 找到 ${APP_NAME} 被阻止的提示，点击“仍要打开”。
+4. 根据系统提示确认。
+
+启动后没有窗口？
+----------------
+${APP_NAME} 是菜单栏应用，不显示 Dock 图标，启动后驻留在屏幕顶部菜单栏。
+首次成功启动会自动打开设置窗口；关闭设置窗口不会退出应用。
+
+如果使用 Bartender、Ice 等菜单栏管理工具，请检查隐藏区域。
+带刘海的 Mac 也可能因菜单栏空间不足而隐藏图标。
+
+确认应用是否运行：
+打开“活动监视器”搜索 ${APP_NAME}，或在终端执行：
+
+pgrep -fl ${APP_NAME}
+
+如果系统提示“App 已损坏”
+------------------------
+仅当文件来自上述官方 GitHub Release，且校验值与 Release 页面一致时，才在终端执行：
+
+xattr -dr com.apple.quarantine /Applications/${APP_NAME}.app
+open /Applications/${APP_NAME}.app
+
+该命令只移除 ${APP_NAME} 的下载隔离属性，不会全局关闭 Gatekeeper。
+
+查看启动错误
+------------
+在终端执行：
+
+/Applications/${APP_NAME}.app/Contents/MacOS/${EXECUTABLE_NAME}
+
+如果仍无法启动，请将终端输出、macOS 版本和 Mac 芯片型号提交到：
+https://github.com/HeyHuazi/CraftMeter/issues
+
+安全警告
+--------
+不要执行 sudo spctl --master-disable。
+${APP_NAME} 不要求关闭整台 Mac 的 Gatekeeper。
 EOF
 }
 
@@ -316,6 +392,7 @@ EOF
 }
 
 # Remove old distributables first so a failed package run cannot leave stale output.
+validate_package_mode
 clean_previous_artifacts
 
 # Always build fresh release before packaging to avoid stale DMG content.
@@ -397,7 +474,7 @@ if should_notarize && [[ -z "$(signing_identity)" ]]; then
   die "notarization requires DEVELOPER_ID_APPLICATION (or CODESIGN_IDENTITY) to be set"
 fi
 
-log "Packaging mode: $(sign_mode)"
+log "Packaging mode: $PACKAGE_MODE ($(sign_mode))"
 sign_app_bundle "$APP_DIR"
 assess_bundle "$APP_DIR"
 

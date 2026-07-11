@@ -78,7 +78,9 @@ jobs:
             exit 1
           fi
 
-      - name: Build release assets
+      - name: Build preview release assets
+        env:
+          PACKAGE_MODE: preview
         shell: bash
         run: |
           set -euo pipefail
