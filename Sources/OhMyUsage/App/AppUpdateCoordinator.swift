@@ -514,9 +514,7 @@ extension AppViewModel {
     func checkForAppUpdate(force: Bool = false) {
         updateCoordinator.checkForAppUpdate(
             force: force,
-            effectiveInstalledVersion: AppVersionResolver.detectNewestInstalledAppVersion(
-                fallbackVersion: currentAppVersion
-            ),
+            effectiveInstalledVersion: installedAppVersionResolver(currentAppVersion),
             getState: { self.updateStateStorage },
             setState: { self.updateStateStorage = $0 }
         )

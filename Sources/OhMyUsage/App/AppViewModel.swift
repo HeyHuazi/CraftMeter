@@ -6,7 +6,7 @@ import Observation
 import UserNotifications
 
 /**
- * [INPUT]: 依赖配置仓储、Provider 工厂、凭据/通知服务、历史统计协调器与 macOS 运行时能力。
+ * [INPUT]: 依赖配置仓储、Provider 工厂、凭据/通知服务、历史统计协调器、可注入的已安装版本解析器与 macOS 运行时能力。
  * [OUTPUT]: 对外提供 CraftMeter 全局可观察状态、生命周期动作及各功能协调器的统一入口。
  * [POS]: App 层状态中枢；保存会话状态并委托专职 coordinator，避免 UI 直接操作服务实现。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -40,6 +40,7 @@ final class AppViewModel {
     @ObservationIgnored let menuBarUsageAnalyticsCoordinator: MenuBarUsageAnalyticsCoordinator
     @ObservationIgnored var refreshScheduler: ProviderRefreshScheduler?
     @ObservationIgnored let providerRefreshCoordinator: AppProviderRefreshCoordinator
+    @ObservationIgnored let installedAppVersionResolver: (String) -> String
     @ObservationIgnored let officialAccountImportCoordinator = AppOfficialAccountImportCoordinator()
     @ObservationIgnored let officialAccountSwitchCoordinator = AppOfficialAccountSwitchCoordinator()
     @ObservationIgnored let officialProfileLifecycleCoordinator = AppOfficialProfileLifecycleCoordinator()
@@ -288,6 +289,9 @@ final class AppViewModel {
             providerFactory: resolvedProviderFactory,
             notifications: notificationService
         )
+        self.installedAppVersionResolver = { fallbackVersion in
+            AppVersionResolver.detectNewestInstalledAppVersion(fallbackVersion: fallbackVersion)
+        }
         self.updateCoordinator = AppUpdateCoordinator(
             appUpdateService: appUpdateService,
             postUpdateReleaseNotesStore: postUpdateReleaseNotesStore,
@@ -384,6 +388,7 @@ final class AppViewModel {
             providerFactory: resolvedProviderFactory,
             notifications: notificationService
         )
+        self.installedAppVersionResolver = { $0 }
         self.updateCoordinator = AppUpdateCoordinator(
             appUpdateService: appUpdateService,
             postUpdateReleaseNotesStore: postUpdateReleaseNotesStore,

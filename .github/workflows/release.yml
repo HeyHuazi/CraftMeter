@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   build-and-release:
-    runs-on: macos-latest
+    runs-on: macos-15
 
     env:
       TAG_NAME: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
@@ -24,12 +24,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Setup Swift
-        uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: "6.2.0"
+      - name: Verify Swift Toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          swift --version
+          swift package describe >/dev/null
 
       - name: Resolve version
         id: version
