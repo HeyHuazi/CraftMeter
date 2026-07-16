@@ -4,6 +4,23 @@ import XCTest
 @testable import OhMyUsage
 
 final class UsageAnalyticsRepositoryTests: XCTestCase {
+    private final class ReadPathRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var indexedCalls = 0
+        private var legacyCalls = 0
+        private var paths: [UsageAnalyticsRepository.RecordReadPath] = []
+
+        func recordIndexed() { lock.withLock { indexedCalls += 1 } }
+        func recordLegacy() { lock.withLock { legacyCalls += 1 } }
+        func recordPath(_ path: UsageAnalyticsRepository.RecordReadPath) {
+            lock.withLock { paths.append(path) }
+        }
+
+        var snapshot: (indexed: Int, legacy: Int, paths: [UsageAnalyticsRepository.RecordReadPath]) {
+            lock.withLock { (indexedCalls, legacyCalls, paths) }
+        }
+    }
+
     override func setUp() {
         super.setUp()
         UsageAnalyticsRepository.clearSourceFingerprintCacheForTesting()
@@ -14,8 +31,83 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
         super.tearDown()
     }
 
-    func testUsageAnalyticsFilterDefaultsToLast30DaysRange() {
-        XCTAssertEqual(UsageAnalyticsFilter().range, .last30Days)
+    func testRepositoryUsesIndexedRecordsWhenCompleteGenerationMatchesFingerprint() throws {
+        let now = try fixedDate("2026-05-16T12:00:00Z")
+        let fingerprint = Self.sourceFingerprint(seed: 1)
+        let recorder = ReadPathRecorder()
+        let record = analyticsRecord(
+            source: .ohMyUsageLocal,
+            eventAt: now.addingTimeInterval(-60),
+            requestID: "indexed",
+            totals: UsageMetricTotals(requestCount: 1, successCount: 1, outputTokens: 42)
+        )
+        let repository = UsageAnalyticsRepository(
+            nowProvider: { now },
+            ccSwitchSourceFingerprintProvider: { _ in fingerprint.ccSwitch },
+            localSourceFingerprintProvider: { _ in Self.cachedLocalFingerprint(from: fingerprint) },
+            pricingCatalog: Self.offlinePricingCatalog(),
+            indexedRecordsLoader: { _, _, receivedFingerprint in
+                recorder.recordIndexed()
+                XCTAssertEqual(receivedFingerprint, fingerprint)
+                return [record]
+            },
+            legacyRecordsLoader: { _, _, _ in
+                recorder.recordLegacy()
+                return ([], [])
+            },
+            onRecordReadPath: { recorder.recordPath($0) }
+        )
+
+        let snapshot = repository.snapshot(filter: UsageAnalyticsFilter(range: .today))
+
+        let observed = recorder.snapshot
+        XCTAssertEqual(snapshot.totals.totalTokens, 42)
+        XCTAssertEqual(observed.indexed, 1)
+        XCTAssertEqual(observed.legacy, 0)
+        XCTAssertEqual(observed.paths, [.indexed])
+    }
+
+    func testRepositoryFallsBackToLegacyWhenIndexedReadFails() throws {
+        enum IndexedFailure: Error { case unreadable }
+        let now = try fixedDate("2026-05-16T12:00:00Z")
+        let fingerprint = Self.sourceFingerprint(seed: 2)
+        let recorder = ReadPathRecorder()
+        let record = analyticsRecord(
+            source: .ohMyUsageLocal,
+            eventAt: now.addingTimeInterval(-60),
+            requestID: "legacy",
+            totals: UsageMetricTotals(requestCount: 1, successCount: 1, inputTokens: 21)
+        )
+        let repository = UsageAnalyticsRepository(
+            nowProvider: { now },
+            ccSwitchSourceFingerprintProvider: { _ in fingerprint.ccSwitch },
+            localSourceFingerprintProvider: { _ in Self.cachedLocalFingerprint(from: fingerprint) },
+            pricingCatalog: Self.offlinePricingCatalog(),
+            indexedRecordsLoader: { _, _, _ in
+                recorder.recordIndexed()
+                throw IndexedFailure.unreadable
+            },
+            legacyRecordsLoader: { since, until, _ in
+                recorder.recordLegacy()
+                XCTAssertLessThanOrEqual(since, record.eventAt)
+                XCTAssertGreaterThan(until, record.eventAt)
+                return ([record], ["legacy-diagnostic"])
+            },
+            onRecordReadPath: { recorder.recordPath($0) }
+        )
+
+        let snapshot = repository.snapshot(filter: UsageAnalyticsFilter(range: .today))
+
+        let observed = recorder.snapshot
+        XCTAssertEqual(snapshot.totals.totalTokens, 21)
+        XCTAssertEqual(snapshot.diagnostics, ["legacy-diagnostic"])
+        XCTAssertEqual(observed.indexed, 1)
+        XCTAssertEqual(observed.legacy, 1)
+        XCTAssertEqual(observed.paths, [.legacy])
+    }
+
+    func testUsageAnalyticsFilterDefaultsToCurrentMonthRange() {
+        XCTAssertEqual(UsageAnalyticsFilter().range, .month)
     }
 
     func testApplicationTargetOwnsUsageAnalyticsAggregation() throws {
@@ -24,7 +116,7 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
 
         let interval = OhMyUsageApplication.UsageAnalyticsAggregator.rangeInterval(
-            .last7Days,
+            .week,
             calendar: calendar,
             now: now
         )
@@ -119,7 +211,7 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let now = try fixedDate("2026-05-16T12:00:00Z")
-        let filter = UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .last7Days)
+        let filter = UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .week)
         let snapshot = UsageAnalyticsSnapshot(
             generatedAt: now,
             filter: filter,
@@ -148,13 +240,58 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
         XCTAssertEqual(entry.sourceFingerprint, fingerprint)
     }
 
+    func testCacheStoreCanDeferDiskRestoreUntilRequested() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("usage-analytics-cache-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let now = try fixedDate("2026-05-16T12:00:00Z")
+        let filter = UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .week)
+        let snapshot = UsageAnalyticsSnapshot.empty(filter: filter, generatedAt: now)
+        UsageAnalyticsSnapshotCacheStore(baseDirectoryURL: root, nowProvider: { now })
+            .save(snapshot: snapshot, sourceFingerprint: nil)
+
+        let deferred = UsageAnalyticsSnapshotCacheStore(
+            baseDirectoryURL: root,
+            nowProvider: { now },
+            restoreImmediately: false
+        )
+
+        XCTAssertFalse(deferred.isRestored)
+        XCTAssertNil(deferred.entry(for: filter))
+
+        deferred.restoreIfNeeded()
+
+        XCTAssertTrue(deferred.isRestored)
+        XCTAssertEqual(deferred.entry(for: filter)?.snapshot, snapshot)
+    }
+
+    func testCacheStoreResetClearsMemoryAndRemovesSnapshotAndManifest() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("usage-analytics-cache-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let now = try fixedDate("2026-05-16T12:00:00Z")
+        let filter = UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .week)
+        let snapshot = UsageAnalyticsSnapshot.empty(filter: filter, generatedAt: now)
+        let store = UsageAnalyticsSnapshotCacheStore(baseDirectoryURL: root, nowProvider: { now })
+        store.save(snapshot: snapshot, sourceFingerprint: nil)
+
+        store.reset()
+
+        XCTAssertTrue(store.isRestored)
+        XCTAssertNil(store.entry(for: filter))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: usageAnalyticsCacheURL(root: root).path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: usageAnalyticsCacheManifestURL(root: root).path))
+    }
+
     func testCacheStoreWritesCompactJSONPayload() throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("usage-analytics-cache-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
 
         let now = try fixedDate("2026-05-16T12:00:00Z")
-        let filter = UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .last7Days)
+        let filter = UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .week)
         let snapshot = UsageAnalyticsSnapshot.empty(filter: filter, generatedAt: now)
         let store = UsageAnalyticsSnapshotCacheStore(baseDirectoryURL: root, nowProvider: { now })
 
@@ -171,7 +308,7 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let now = try fixedDate("2026-05-16T12:00:00Z")
-        let filter = UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .last7Days)
+        let filter = UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .week)
         let snapshot = UsageAnalyticsSnapshot.empty(filter: filter, generatedAt: now)
         let store = UsageAnalyticsSnapshotCacheStore(baseDirectoryURL: root, nowProvider: { now })
 
@@ -185,6 +322,57 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
         XCTAssertEqual(firstModifiedAt, secondModifiedAt)
     }
 
+    func testCacheStoreValidationUpdatesOnlyManifestAndRestoresMetadata() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("usage-analytics-cache-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let refreshedAt = try fixedDate("2026-05-16T12:00:00Z")
+        let validatedAt = refreshedAt.addingTimeInterval(120)
+        let filter = UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .week)
+        let snapshot = UsageAnalyticsSnapshot.empty(filter: filter, generatedAt: refreshedAt)
+        let initialFingerprint = UsageAnalyticsSourceFingerprint(
+            ccSwitch: Self.fileFingerprint(root: "/tmp/cc-switch", seed: 1),
+            codex: Self.fileFingerprint(root: "/tmp/codex", seed: 1),
+            claude: Self.fileFingerprint(root: "/tmp/claude", seed: 1),
+            kimi: Self.fileFingerprint(root: "/tmp/kimi", seed: 1)
+        )
+        let validatedFingerprint = UsageAnalyticsSourceFingerprint(
+            ccSwitch: Self.fileFingerprint(root: "/tmp/cc-switch", seed: 2),
+            codex: Self.fileFingerprint(root: "/tmp/codex", seed: 2),
+            claude: Self.fileFingerprint(root: "/tmp/claude", seed: 2),
+            kimi: Self.fileFingerprint(root: "/tmp/kimi", seed: 2)
+        )
+        let store = UsageAnalyticsSnapshotCacheStore(baseDirectoryURL: root, nowProvider: { refreshedAt })
+
+        store.save(snapshot: snapshot, sourceFingerprint: initialFingerprint)
+        let cacheURL = usageAnalyticsCacheURL(root: root)
+        let manifestURL = usageAnalyticsCacheManifestURL(root: root)
+        let cacheModifiedAt = try modificationDate(at: cacheURL)
+        let firstManifestModifiedAt = try modificationDate(at: manifestURL)
+
+        Thread.sleep(forTimeInterval: 1.1)
+        store.markValidated(
+            filter: filter,
+            sourceFingerprint: validatedFingerprint,
+            at: validatedAt
+        )
+
+        XCTAssertEqual(try modificationDate(at: cacheURL), cacheModifiedAt)
+        XCTAssertGreaterThan(try modificationDate(at: manifestURL), firstManifestModifiedAt)
+        XCTAssertLessThan(
+            try Data(contentsOf: manifestURL).count,
+            try Data(contentsOf: cacheURL).count
+        )
+
+        let restored = UsageAnalyticsSnapshotCacheStore(baseDirectoryURL: root, nowProvider: { validatedAt })
+        let entry = try XCTUnwrap(restored.entry(for: filter))
+        XCTAssertEqual(entry.snapshot, snapshot)
+        XCTAssertEqual(entry.sourceFingerprint, validatedFingerprint)
+        XCTAssertEqual(entry.refreshedAt, validatedAt)
+        XCTAssertEqual(entry.lastFingerprintCheckedAt, validatedAt)
+    }
+
     func testCacheStoreSkipsFingerprintProbeWithinInterval() throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("usage-analytics-cache-\(UUID().uuidString)", isDirectory: true)
@@ -192,7 +380,7 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
 
         let refreshedAt = try fixedDate("2026-05-16T12:00:00Z")
         var now = refreshedAt
-        let filter = UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .last24Hours)
+        let filter = UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .today)
         let snapshot = UsageAnalyticsSnapshot.empty(filter: filter, generatedAt: refreshedAt)
         let store = UsageAnalyticsSnapshotCacheStore(baseDirectoryURL: root, nowProvider: { now })
 
@@ -217,7 +405,7 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
         )
     }
 
-    func testCacheStoreTreatsHourlyRangeAsStaleAcrossHourBoundary() throws {
+    func testCacheStoreKeepsTodayRangeFreshWithinSameDayAndExpiresNextDay() throws {
         let root = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("usage-analytics-cache-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -225,18 +413,26 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let refreshedAt = try fixedDate("2026-05-16T12:59:00Z")
-        let filter = UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .last24Hours)
+        let filter = UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .today)
         let snapshot = UsageAnalyticsSnapshot.empty(filter: filter, generatedAt: refreshedAt)
         let store = UsageAnalyticsSnapshotCacheStore(baseDirectoryURL: root, nowProvider: { refreshedAt })
 
         store.save(snapshot: snapshot, sourceFingerprint: nil)
 
-        XCTAssertFalse(
+        XCTAssertTrue(
             store.isEntryTemporallyFresh(
                 for: filter,
                 now: try fixedDate("2026-05-16T13:00:01Z"),
                 calendar: calendar,
                 ttl: 15 * 60
+            )
+        )
+        XCTAssertFalse(
+            store.isEntryTemporallyFresh(
+                for: filter,
+                now: try fixedDate("2026-05-17T00:00:01Z"),
+                calendar: calendar,
+                ttl: 24 * 60 * 60
             )
         )
     }
@@ -432,7 +628,7 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
         )
 
         let snapshot = repository.snapshot(
-            filter: UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .last24Hours)
+            filter: UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .today)
         )
 
         XCTAssertEqual(rowReadCount, 1)
@@ -519,7 +715,7 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
 
         let snapshot = UsageAnalyticsAggregator.snapshot(
             records: [duplicatedLocal, duplicatedProxy, claudeLocal, codexOfficial],
-            filter: UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .last24Hours),
+            filter: UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .today),
             calendar: calendar,
             now: now,
             diagnostics: []
@@ -527,7 +723,7 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
 
         XCTAssertEqual(snapshot.totals.requestCount, 3)
         XCTAssertEqual(snapshot.totals.totalTokens, 275)
-        XCTAssertEqual(snapshot.trendBuckets.count, 24)
+        XCTAssertEqual(snapshot.trendBuckets.count, 13)
 
         let providerCategories = Dictionary(uniqueKeysWithValues: snapshot.providerCategoryStats.map { ($0.name, $0.totals.totalTokens) })
         XCTAssertEqual(providerCategories["中转代理"], 160)
@@ -575,7 +771,7 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
 
         let snapshot = UsageAnalyticsAggregator.snapshot(
             records: records,
-            filter: UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .last24Hours),
+            filter: UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .today),
             calendar: calendar,
             now: now,
             diagnostics: []
@@ -616,7 +812,7 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
 
         let snapshot = UsageAnalyticsAggregator.snapshot(
             records: records,
-            filter: UsageAnalyticsFilter(mode: .byModel, selectedModelID: "gpt-5.5", range: .last7Days),
+            filter: UsageAnalyticsFilter(mode: .byModel, selectedModelID: "gpt-5.5", range: .week),
             calendar: calendar,
             now: now,
             diagnostics: []
@@ -657,9 +853,9 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
             )
         ]
 
-        let last30Snapshot = UsageAnalyticsAggregator.snapshot(
+        let monthSnapshot = UsageAnalyticsAggregator.snapshot(
             records: records,
-            filter: UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .last30Days),
+            filter: UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .month),
             calendar: calendar,
             now: now,
             diagnostics: []
@@ -672,8 +868,8 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
             diagnostics: []
         )
 
-        XCTAssertEqual(last30Snapshot.totals.totalTokens, 15)
-        XCTAssertEqual(last30Snapshot.trendBuckets.count, 30)
+        XCTAssertEqual(monthSnapshot.totals.totalTokens, 15)
+        XCTAssertEqual(monthSnapshot.trendBuckets.count, 16)
         XCTAssertEqual(allSnapshot.totals.totalTokens, 115)
         XCTAssertEqual(allSnapshot.trendBuckets.count, 20)
         XCTAssertEqual(allSnapshot.trendBuckets.first?.startAt, try fixedDate("2026-01-03T00:00:00Z"))
@@ -761,7 +957,7 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
 
         let snapshot = UsageAnalyticsAggregator.snapshot(
             records: [],
-            filter: UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .last7Days),
+            filter: UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .week),
             calendar: calendar,
             now: now,
             diagnostics: []
@@ -778,8 +974,8 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
 
     func testSnapshotAggregatesLargeFilteredDatasetWithBoundaryDatesAndStableModelTitles() throws {
         let now = try fixedDate("2026-05-16T12:00:00Z")
-        let rangeStart = try fixedDate("2026-04-17T00:00:00Z")
-        let rangeEnd = try fixedDate("2026-05-17T00:00:00Z")
+        let rangeStart = try fixedDate("2026-05-01T00:00:00Z")
+        let rangeEnd = try fixedDate("2026-06-01T00:00:00Z")
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         var records: [UsageAnalyticsRecord] = []
@@ -844,7 +1040,7 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
 
         let snapshot = UsageAnalyticsAggregator.snapshot(
             records: records,
-            filter: UsageAnalyticsFilter(mode: .byModel, selectedModelID: "gpt-5.5", range: .last30Days),
+            filter: UsageAnalyticsFilter(mode: .byModel, selectedModelID: "gpt-5.5", range: .month),
             calendar: calendar,
             now: now,
             diagnostics: []
@@ -860,7 +1056,7 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
         XCTAssertEqual(snapshot.availableModels.first?.title, "GPT-5.5")
         XCTAssertEqual(snapshot.availableModels.first?.totalTokens, expectedGPT55Totals.totalTokens)
         XCTAssertEqual(snapshot.availableModels.first(where: { $0.id == "gpt-5.4" })?.totalTokens, expectedGPT54Totals.totalTokens)
-        XCTAssertEqual(snapshot.trendBuckets.count, 30)
+        XCTAssertEqual(snapshot.trendBuckets.count, 16)
         XCTAssertEqual(
             snapshot.trendBuckets.reduce(into: UsageMetricTotals()) { $0.add($1.totals) },
             expectedGPT55Totals
@@ -882,6 +1078,38 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
         XCTAssertEqual(totals.successRate, 0.75, accuracy: 0.0001)
     }
 
+    private static func offlinePricingCatalog() -> ModelPricingCatalog {
+        ModelPricingCatalog(
+            dataLoader: { _ in throw URLError(.notConnectedToInternet) },
+            bundledData: Data("{}".utf8)
+        )
+    }
+
+    private static func sourceFingerprint(seed: Int) -> UsageAnalyticsSourceFingerprint {
+        UsageAnalyticsSourceFingerprint(
+            ccSwitch: fileFingerprint(root: "/tmp/cc-switch", seed: seed),
+            codex: fileFingerprint(root: "/tmp/codex", seed: seed),
+            claude: fileFingerprint(root: "/tmp/claude", seed: seed),
+            kimi: fileFingerprint(root: "/tmp/kimi", seed: seed),
+            gemini: fileFingerprint(root: "/tmp/gemini", seed: seed),
+            qwen: fileFingerprint(root: "/tmp/qwen", seed: seed),
+            craftAgent: fileFingerprint(root: "/tmp/craft", seed: seed)
+        )
+    }
+
+    private static func cachedLocalFingerprint(
+        from fingerprint: UsageAnalyticsSourceFingerprint
+    ) -> UsageAnalyticsRepository.CachedLocalSourceFingerprint {
+        UsageAnalyticsRepository.CachedLocalSourceFingerprint(
+            codex: fingerprint.codex,
+            claude: fingerprint.claude,
+            kimi: fingerprint.kimi,
+            gemini: fingerprint.gemini,
+            qwen: fingerprint.qwen,
+            craftAgent: fingerprint.craftAgent
+        )
+    }
+
     private func fixedDate(_ value: String) throws -> Date {
         let formatter = ISO8601DateFormatter()
         guard let date = formatter.date(from: value) else {
@@ -894,6 +1122,12 @@ final class UsageAnalyticsRepositoryTests: XCTestCase {
         root
             .appendingPathComponent("CraftMeter", isDirectory: true)
             .appendingPathComponent("usage_analytics_cache.json")
+    }
+
+    private func usageAnalyticsCacheManifestURL(root: URL) -> URL {
+        root
+            .appendingPathComponent("CraftMeter", isDirectory: true)
+            .appendingPathComponent("usage_analytics_cache_manifest.json")
     }
 
     private func modificationDate(at url: URL) throws -> Date {

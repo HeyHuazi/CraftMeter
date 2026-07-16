@@ -45,7 +45,7 @@ SettingsTheme.swift: 设置界面主题值对象。
 SettingsThresholdControls.swift: 阈值配置控件。
 SettingsViewShell.swift: SettingsView 生命周期、导航与页面装配层。
 SettingsViewTheme.swift: SettingsView 的主题解析扩展。
-SettingsVisualTokens.swift: 设置界面尺寸、颜色与视觉常量。
+SettingsVisualTokens.swift: 设置与菜单界面的尺寸、颜色和视觉常量；`Menu.contentViewportHeight = 520` 是额度页与用量页唯一共享的内容高度来源，`Menu.panelPreferredHeight = 600` 锁定紧凑外框，溢出由各页 ScrollView 消化。
 SettingsWindowAppearanceController.swift: 设置窗口外观控制器。
 SettingsWorkspacePresentation.swift: 设置页头与侧边栏的纯展示模型构建器。
 SettingsWorkspaceSidebarView.swift: 工作台侧边栏渲染与底部操作区。
@@ -53,8 +53,8 @@ ThirdPartyProviderDetailCardView.swift: 第三方 Provider 详情卡片容器。
 UsageAnalyticsFacetViews.swift: typed Craft facet 的覆盖率排行展示；显式允许重叠归因，不将各项强制归一化。
 UsageAnalyticsFilterBar.swift: 历史统计的客户端、Provider、项目、模型与 typed Craft facet 组合筛选条；只绑定 filter，不承载聚合策略。
 UsageAnalyticsModelBrandPresentation.swift: 使用统计模型品牌的纯展示解析器与紧凑图标组件；优先复用 bundled 资源，Qwen 专属资源来自 MIT 许可的 Lobe Icons，遇到歧义回退通用图标。
-UsageAnalyticsSettingsView.swift: 本地历史用量统计页面编排；展示总览、统一筛选口径趋势、客户端/Provider/项目/模型统计与可重叠 Craft 活动覆盖率，并区分上游报告、Models.dev 估算、部分定价下界和完全未知费用。
-UsageAnalyticsStatisticsViews.swift: 使用统计的环形图、品牌图例与维度明细表；模型行消费品牌展示元数据，不参与事实归属判断。
+UsageAnalyticsSettingsView.swift: 本地历史用量统计页面编排；使用今天/本周/本月/全部自然周期，展示统一筛选口径趋势、客户端/Provider/项目/模型统计与可重叠 Craft 活动覆盖率，并区分上游报告、Models.dev 估算、部分定价下界和完全未知费用。
+UsageAnalyticsStatisticsViews.swift: 使用统计的环形图、品牌图例与维度明细表；模型行展示 input/output/reasoning/cache、费用与定价状态，消费品牌展示元数据但不参与事实归属判断。
 
 设计边界
 

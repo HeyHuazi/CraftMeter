@@ -89,6 +89,38 @@ final class AppViewModelStatusBarRefreshTests: XCTestCase {
         XCTAssertNil(viewModel.snapshots[first.id])
     }
 
+    func testMenuBarUsageAnalyticsRuntimeIsConstructedOnlyForHistoricalStyle() {
+        var constructionCount = 0
+        let viewModel = AppViewModel(
+            testingConfig: AppConfig(statusBarDisplayStyle: .iconPercent, providers: []),
+            appUpdateService: NoopStatusBarRefreshAppUpdateService(),
+            menuBarUsageAnalyticsCoordinatorFactory: {
+                constructionCount += 1
+                return MenuBarUsageAnalyticsCoordinator(
+                    sourceFingerprintLoader: { _ in
+                        UsageAnalyticsSourceFingerprint(
+                            ccSwitch: .empty,
+                            codex: .empty,
+                            claude: .empty,
+                            kimi: .empty
+                        )
+                    },
+                    summaryLoader: { _, _ in .empty() }
+                )
+            }
+        )
+
+        XCTAssertEqual(constructionCount, 0)
+        viewModel.refreshMenuBarUsageAnalyticsIfNeeded()
+        XCTAssertEqual(constructionCount, 0)
+
+        viewModel.config.statusBarDisplayStyle = StatusBarDisplayStyle.usageTokens
+        viewModel.refreshMenuBarUsageAnalyticsIfNeeded()
+        viewModel.refreshMenuBarUsageAnalyticsIfNeeded()
+
+        XCTAssertEqual(constructionCount, 1)
+    }
+
     private func waitUntil(
         timeout: TimeInterval = 2,
         predicate: @escaping () async -> Bool

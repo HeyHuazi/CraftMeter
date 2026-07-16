@@ -2,6 +2,13 @@ import Foundation
 import LocalAuthentication
 import Security
 
+/**
+ * [INPUT]: 依赖 Security/LocalAuthentication 的 generic password API，依赖 ShellCommand 作为生产环境 Keychain 写入兜底。
+ * [OUTPUT]: 对外提供桌面应用 OAuth/浏览器凭据导入所需的通用密码读取与保存能力。
+ * [POS]: Services 的低层系统凭据边界；生产环境可触达 macOS Keychain，XCTest 默认短路以保护开发机钥匙串。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 enum SecurityCredentialReader {
     private struct CredentialCacheKey: Hashable {
         let service: String
@@ -38,6 +45,11 @@ enum SecurityCredentialReader {
             }
         }
 
+        if isRunningInXCTest {
+            cache(.missing, for: cacheKey, now: now)
+            return nil
+        }
+
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: normalizedService,
@@ -68,6 +80,9 @@ enum SecurityCredentialReader {
     static func saveGenericPassword(service: String, account: String? = nil, text: String) -> Bool {
         let normalizedService = normalize(service)
         let normalizedAccount = normalizeOptional(account) ?? normalizedService
+        guard !isRunningInXCTest else {
+            return false
+        }
         let deleteQuery: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: normalizedService,
@@ -150,6 +165,14 @@ enum SecurityCredentialReader {
         guard let value else { return nil }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static var isRunningInXCTest: Bool {
+        let environment = ProcessInfo.processInfo.environment
+        return environment["XCTestConfigurationFilePath"] != nil ||
+            environment["XCTest_SESSION_IDENTIFIER"] != nil ||
+            ProcessInfo.processInfo.processName.lowercased().contains("xctest") ||
+            Bundle.main.bundlePath.lowercased().contains(".xctest")
     }
 
     private static func nonInteractiveContext() -> LAContext {

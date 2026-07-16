@@ -1,5 +1,12 @@
 import SwiftUI
 
+/**
+ * [INPUT]: 依赖 SwiftUI 的 Color 与 CGFloat，为设置工作台和菜单面板提供统一视觉常量。
+ * [OUTPUT]: 对外提供颜色、圆角、间距、控件尺寸、菜单 600px 首选外框及 520px 共享内容视口 Token。
+ * [POS]: UI/Settings 的视觉基元目录；菜单根视图和子页面必须复用同一 contentViewportHeight，并以 panelPreferredHeight 锁定紧凑外框。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 enum SettingsVisualTokens {
     enum Smoothing {
         static let continuous: CGFloat = 0.6
@@ -85,6 +92,7 @@ enum SettingsVisualTokens {
         static let cardBackground = Color.black
         static let groupBackground = Color.black.opacity(0.30)
         static let panelWidth: CGFloat = 324
+        static let panelPreferredHeight: CGFloat = 600
         static let panelMaxHeight: CGFloat = 800
         static let panelTopPadding: CGFloat = 12
         static let panelBottomPadding: CGFloat = 8
@@ -99,6 +107,8 @@ enum SettingsVisualTokens {
         static let headerActionSpacing: CGFloat = 12
         static let headerActionIconOpacity: Double = 0.4
         static let cardsViewportCornerRadius: CGFloat = 12
+        static let contentViewportHeight: CGFloat = 520
+        static let dashboardSectionSpacing: CGFloat = 6
         static let dividerHeight: CGFloat = 1
         static let progressTrackHeight: CGFloat = 4
     }

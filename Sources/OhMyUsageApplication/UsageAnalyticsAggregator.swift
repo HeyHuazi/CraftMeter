@@ -265,21 +265,17 @@ public enum UsageAnalyticsAggregator {
         now: Date
     ) -> DateInterval {
         switch range {
-        case .last24Hours:
-            let currentHour = calendar.dateInterval(of: .hour, for: now)?.start ?? now
-            let start = calendar.date(byAdding: .hour, value: -23, to: currentHour) ?? currentHour
-            let end = calendar.date(byAdding: .hour, value: 1, to: currentHour) ?? now
-            return DateInterval(start: start, end: end)
-        case .last7Days:
-            let today = calendar.startOfDay(for: now)
-            let start = calendar.date(byAdding: .day, value: -6, to: today) ?? today
-            let end = calendar.date(byAdding: .day, value: 1, to: today) ?? now
-            return DateInterval(start: start, end: end)
-        case .last30Days:
-            let today = calendar.startOfDay(for: now)
-            let start = calendar.date(byAdding: .day, value: -29, to: today) ?? today
-            let end = calendar.date(byAdding: .day, value: 1, to: today) ?? now
-            return DateInterval(start: start, end: end)
+        case .today:
+            return calendar.dateInterval(of: .day, for: now)
+                ?? DateInterval(start: calendar.startOfDay(for: now), end: now)
+        case .week:
+            return calendar.dateInterval(of: .weekOfYear, for: now)
+                ?? calendar.dateInterval(of: .day, for: now)
+                ?? DateInterval(start: calendar.startOfDay(for: now), end: now)
+        case .month:
+            return calendar.dateInterval(of: .month, for: now)
+                ?? calendar.dateInterval(of: .day, for: now)
+                ?? DateInterval(start: calendar.startOfDay(for: now), end: now)
         case .all:
             return DateInterval(start: .distantPast, end: .distantFuture)
         }
@@ -495,22 +491,44 @@ public enum UsageAnalyticsAggregator {
     ) -> [UsageTrendBucket] {
         let plan: TrendBucketPlan
         switch range {
-        case .last24Hours:
+        case .today:
+            let dayStart = calendar.dateInterval(of: .day, for: now)?.start
+                ?? calendar.startOfDay(for: now)
             let currentHour = calendar.dateInterval(of: .hour, for: now)?.start ?? now
             plan = TrendBucketPlan(
-                starts: (0..<24).compactMap { calendar.date(byAdding: .hour, value: -(23 - $0), to: currentHour) },
+                starts: continuousStarts(
+                    from: dayStart,
+                    through: currentHour,
+                    component: .hour,
+                    step: 1,
+                    calendar: calendar
+                ),
                 granularity: .hour
             )
-        case .last7Days:
+        case .week:
+            let interval = rangeInterval(.week, calendar: calendar, now: now)
             let today = calendar.startOfDay(for: now)
             plan = TrendBucketPlan(
-                starts: (0..<7).compactMap { calendar.date(byAdding: .day, value: -(6 - $0), to: today) },
+                starts: continuousStarts(
+                    from: interval.start,
+                    through: today,
+                    component: .day,
+                    step: 1,
+                    calendar: calendar
+                ),
                 granularity: .day
             )
-        case .last30Days:
+        case .month:
+            let interval = rangeInterval(.month, calendar: calendar, now: now)
             let today = calendar.startOfDay(for: now)
             plan = TrendBucketPlan(
-                starts: (0..<30).compactMap { calendar.date(byAdding: .day, value: -(29 - $0), to: today) },
+                starts: continuousStarts(
+                    from: interval.start,
+                    through: today,
+                    component: .day,
+                    step: 1,
+                    calendar: calendar
+                ),
                 granularity: .day
             )
         case .all:

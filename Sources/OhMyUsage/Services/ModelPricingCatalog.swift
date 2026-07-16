@@ -3,7 +3,7 @@ import OhMyUsageApplication
 
 /**
  * [INPUT]: Reads bundled, cached, and public Models.dev provider catalogs plus normalized analytics records.
- * [OUTPUT]: Resolves conservative provider-aware ModelPricingQuote values and maintains a validated last-known-good cache.
+ * [OUTPUT]: Resolves provider-first, exact-model fallback ModelPricingQuote values and maintains a validated last-known-good cache.
  * [POS]: OhMyUsage Services pricing adapter; isolates external schema, networking, and persistence from scanners and aggregation.
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -28,7 +28,7 @@ final class ModelPricingCatalog: @unchecked Sendable {
         var cost: Cost
     }
 
-    private struct Cost: Codable {
+    private struct Cost: Codable, Equatable {
         var input: Decimal?
         var output: Decimal?
         var reasoning: Decimal?
@@ -104,16 +104,81 @@ final class ModelPricingCatalog: @unchecked Sendable {
     }
 
     func quote(for record: UsageAnalyticsRecord) -> ModelPricingQuote? {
-        guard let providerID = Self.catalogProviderID(for: record) else { return nil }
-        let modelID = Self.normalizedModelID(record.modelID, providerID: providerID)
+        guard !Self.disallowsCatalogFallback(for: record) else { return nil }
         lock.lock()
         let currentPayload = payload
         lock.unlock()
-        guard let provider = currentPayload.providers.first(where: { $0.id == providerID }),
-              let model = provider.models.first(where: { Self.normalizedModelID($0.id, providerID: providerID) == modelID }) else {
+
+        if let providerID = Self.catalogProviderID(for: record),
+           let match = Self.exactMatch(
+               modelID: record.modelID,
+               providerID: providerID,
+               providers: currentPayload.providers
+           ) {
+            return Self.quote(
+                providerID: providerID,
+                model: match,
+                payload: currentPayload
+            )
+        }
+
+        let fallbackMatches = Self.exactMatches(
+            modelID: record.modelID,
+            providers: currentPayload.providers
+        )
+        guard let first = fallbackMatches.first,
+              fallbackMatches.dropFirst().allSatisfy({ $0.model.cost == first.model.cost }) else {
             return nil
         }
-        return ModelPricingQuote(
+        return Self.quote(
+            providerID: first.providerID,
+            model: first.model,
+            payload: currentPayload
+        )
+    }
+
+    private static func exactMatch(
+        modelID: String,
+        providerID: String,
+        providers: [Provider]
+    ) -> Model? {
+        let normalizedID = normalizedModelID(modelID, providerID: providerID)
+        return providers
+            .first(where: { $0.id == providerID })?
+            .models
+            .first(where: { normalizedModelID($0.id, providerID: providerID) == normalizedID })
+    }
+
+    private static func exactMatches(
+        modelID: String,
+        providers: [Provider]
+    ) -> [(providerID: String, model: Model)] {
+        let exactModelID = exactFallbackModelID(modelID)
+        return providers.flatMap { provider in
+            provider.models.compactMap { model in
+                exactFallbackModelID(model.id) == exactModelID
+                    ? (provider.id, model)
+                    : nil
+            }
+        }
+    }
+
+    private static func exactFallbackModelID(_ value: String) -> String {
+        var normalizedValue = normalized(value)
+        for prefix in ["models/", "openai/", "anthropic/", "google/", "alibaba/", "moonshotai/", "deepseek/"] {
+            if normalizedValue.hasPrefix(prefix) {
+                normalizedValue.removeFirst(prefix.count)
+            }
+        }
+        return normalizedValue
+    }
+
+    private static func quote(
+        providerID: String,
+        model: Model,
+        payload: CatalogPayload
+    ) -> ModelPricingQuote {
+        ModelPricingQuote(
             providerID: providerID,
             modelID: model.id,
             inputUSDPerMillion: model.cost.input,
@@ -122,8 +187,8 @@ final class ModelPricingCatalog: @unchecked Sendable {
             cacheReadUSDPerMillion: model.cost.cacheRead,
             cacheWriteUSDPerMillion: model.cost.cacheWrite,
             source: .modelsDev,
-            sourceURL: currentPayload.sourceURL,
-            fetchedAt: currentPayload.fetchedAt
+            sourceURL: payload.sourceURL,
+            fetchedAt: payload.fetchedAt
         )
     }
 
@@ -206,10 +271,7 @@ final class ModelPricingCatalog: @unchecked Sendable {
         let provider = normalized(record.providerID + " " + record.providerName + " " + record.providerCategory)
         let app = normalized(record.appType + " " + record.clientID)
 
-        if provider.contains("openrouter") || provider.contains("vertex") || provider.contains("azure") || provider.contains("bedrock") {
-            return nil
-        }
-        if provider.contains("relay") || provider.contains("中转") || record.source == .ccswitchProxy {
+        if disallowsCatalogFallback(for: record) {
             return nil
         }
         if provider.contains("openai") || provider.contains("codex") || app.contains("codex") {
@@ -231,6 +293,17 @@ final class ModelPricingCatalog: @unchecked Sendable {
             return "deepseek"
         }
         return nil
+    }
+
+    private static func disallowsCatalogFallback(for record: UsageAnalyticsRecord) -> Bool {
+        let provider = normalized(record.providerID + " " + record.providerName + " " + record.providerCategory)
+        return provider.contains("openrouter")
+            || provider.contains("vertex")
+            || provider.contains("azure")
+            || provider.contains("bedrock")
+            || provider.contains("relay")
+            || provider.contains("中转")
+            || record.source == .ccswitchProxy
     }
 
     private static func normalizedModelID(_ value: String, providerID: String) -> String {

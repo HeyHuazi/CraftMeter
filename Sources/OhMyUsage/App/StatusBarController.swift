@@ -3,6 +3,13 @@ import AppKit
 import OhMyUsageApplication
 import SwiftUI
 
+/**
+ * [INPUT]: 依赖 AppViewModel、状态栏 AppKit 控件、固定尺寸 MenuPanelController 与历史展示 presenter。
+ * [OUTPUT]: 对外提供状态栏渲染、常量时间菜单显示、设置窗口跳转及可见期刷新协调。
+ * [POS]: App 的状态栏控制器；菜单点击先显示稳定面板，再由可见状态驱动后台刷新，禁止在 orderFront 前扫描或测量完整 SwiftUI 树。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 @MainActor
 final class StatusBarController: NSObject {
     private let viewModel: AppViewModel
@@ -27,7 +34,6 @@ final class StatusBarController: NSObject {
         configureMenuPanel()
         startAppearanceObservation()
         viewModel.start()
-        viewModel.refreshMenuBarUsageAnalyticsIfNeeded(force: true)
         refreshStatusDisplay()
         statusBarAppearanceController.scheduleFollowUpRefreshes(
             mode: viewModel.statusBarAppearanceMode
@@ -117,10 +123,11 @@ final class StatusBarController: NSObject {
     }
 
     private func showPopover(attachedTo button: NSStatusBarButton) {
-        refreshStatusDisplay()
+        let showInterval = AppPerformanceTracer.begin("MenuPanelShow")
         menuPanelController.show(
             attachedTo: button,
             onDidShow: { [weak self] in
+                AppPerformanceTracer.end(showInterval)
                 guard let self else { return }
                 self.viewModel.setMenuPanelVisible(true)
                 self.restartVisibleRefreshClock()

@@ -2,7 +2,7 @@ import SwiftUI
 
 /**
  * [INPUT]: Observes cached UsageAnalyticsSnapshot state from AppViewModel and model brand presentation metadata.
- * [OUTPUT]: Renders range controls, totals, token/cost trends, dimension breakdowns, typed facets, and model brand icons.
+ * [OUTPUT]: Renders natural range controls, totals, token/cost trends, dimension breakdowns, typed facets, and per-model pricing states.
  * [POS]: OhMyUsage Settings analytics feature; presentation orchestration only, with scanning and aggregation kept outside SwiftUI.
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -61,15 +61,15 @@ struct UsageAnalyticsSettingsView: View {
                 textColor: Color.white.opacity(0.80),
                 height: 24,
                 segmentWidths: [
-                    .all: 48,
-                    .last24Hours: 80,
-                    .last7Days: 58,
-                    .last30Days: 66
+                    .today: 58,
+                    .week: 58,
+                    .month: 58,
+                    .all: 48
                 ]
             ) { range in
                 viewModel.usageAnalyticsFilter.range = range
             }
-            .frame(width: 252, height: 24)
+            .frame(width: 228, height: 24)
 
             UsageAnalyticsFilterBar(
                 filter: Binding(
@@ -310,10 +310,10 @@ private enum UsageStatisticsBreakdown: String, CaseIterable, Hashable {
 }
 
 private let timeRangeOptions: [UsageAnalyticsRange] = [
-    .all,
-    .last24Hours,
-    .last7Days,
-    .last30Days
+    .today,
+    .week,
+    .month,
+    .all
 ]
 
 let usageText80 = Color.white.opacity(0.80)
@@ -323,10 +323,10 @@ private let usageText30 = Color.white.opacity(0.30)
 
 private func timeRangeTitle(_ range: UsageAnalyticsRange) -> String {
     switch range {
+    case .today: return "今天"
+    case .week: return "本周"
+    case .month: return "本月"
     case .all: return "全部"
-    case .last24Hours: return "近24小时"
-    case .last7Days: return "近7天"
-    case .last30Days: return "近30天"
     }
 }
 
@@ -466,16 +466,9 @@ func tokenText(_ value: Int) -> String {
     return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
 }
 
-private func costText(_ totals: UsageMetricTotals) -> String {
-    let amount = String(format: "$%.2f", totals.estimatedCostUSD)
-    switch totals.pricingState {
-    case .reported, .estimated, .mixed:
-        return amount
-    case .partial:
-        return "≥\(amount)"
-    case .unknown:
-        return "未知"
-    }
+func costText(_ totals: UsageMetricTotals) -> String {
+    let value = UsageAnalyticsDisplayFormatter.cost(totals)
+    return value == "—" ? "未知" : value
 }
 
 func percentText(_ value: Double) -> String {

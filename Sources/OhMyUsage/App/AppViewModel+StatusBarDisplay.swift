@@ -48,8 +48,26 @@ extension AppViewModel {
     }
 
     func refreshMenuBarUsageAnalyticsIfNeeded(force: Bool = false) {
-        menuBarUsageAnalyticsCoordinator.refreshIfNeeded(
-            enabled: usesStatusBarUsageAnalytics,
+        guard usesStatusBarUsageAnalytics else {
+            menuBarUsageAnalyticsCoordinator?.refreshIfNeeded(
+                enabled: false,
+                claudeAllConfigDirs: [],
+                force: false,
+                onSummaryChange: { _ in }
+            )
+            return
+        }
+
+        let coordinator: MenuBarUsageAnalyticsCoordinator
+        if let menuBarUsageAnalyticsCoordinator {
+            coordinator = menuBarUsageAnalyticsCoordinator
+        } else {
+            let created = menuBarUsageAnalyticsCoordinatorFactory()
+            menuBarUsageAnalyticsCoordinator = created
+            coordinator = created
+        }
+        coordinator.refreshIfNeeded(
+            enabled: true,
             claudeAllConfigDirs: usageAnalyticsClaudeAllConfigDirs(),
             force: force
         ) { [weak self] summary in

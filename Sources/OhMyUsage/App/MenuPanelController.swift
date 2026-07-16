@@ -1,6 +1,13 @@
 import AppKit
 import SwiftUI
 
+/**
+ * [INPUT]: 依赖 AppKit 状态栏按钮、SwiftUI 根视图、固定 preferred/min/max 几何参数与系统鼠标事件监控。
+ * [OUTPUT]: 对外提供非激活菜单面板配置、常量时间显示、锚定重排和受保护系统窗口外部点击关闭。
+ * [POS]: App 的菜单窗口基础设施；只管理窗口生命周期与几何，禁止在普通 show 路径测量完整 SwiftUI 内容树。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 @MainActor
 final class MenuPanelController {
     private var menuPanel: NSPanel?
@@ -11,6 +18,7 @@ final class MenuPanelController {
     private var onDidClose: (() -> Void)?
 
     private let popoverWidth: CGFloat
+    private let popoverPreferredHeight: CGFloat
     private let popoverMinHeight: CGFloat
     private let popoverMaxHeight: CGFloat
     private let popoverGapBelowStatusIcon: CGFloat
@@ -23,6 +31,7 @@ final class MenuPanelController {
 
     init(
         popoverWidth: CGFloat = 340,
+        popoverPreferredHeight: CGFloat = 600,
         popoverMinHeight: CGFloat = 60,
         popoverMaxHeight: CGFloat = 800,
         gapBelowStatusIcon: CGFloat = 1,
@@ -47,6 +56,10 @@ final class MenuPanelController {
         }
     ) {
         self.popoverWidth = popoverWidth
+        self.popoverPreferredHeight = max(
+            popoverMinHeight,
+            min(popoverMaxHeight, popoverPreferredHeight)
+        )
         self.popoverMinHeight = popoverMinHeight
         self.popoverMaxHeight = popoverMaxHeight
         self.popoverGapBelowStatusIcon = gapBelowStatusIcon
@@ -64,12 +77,13 @@ final class MenuPanelController {
 
     func configure<Content: View>(rootView: Content) {
         let controller = NSHostingController(rootView: AnyView(rootView))
-        controller.view.frame = NSRect(x: 0, y: 0, width: popoverWidth, height: popoverMinHeight)
+        let preferredSize = NSSize(width: popoverWidth, height: popoverPreferredHeight)
+        controller.view.frame = NSRect(origin: .zero, size: preferredSize)
         controller.view.wantsLayer = true
         controller.view.layer?.backgroundColor = NSColor.clear.cgColor
 
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: popoverWidth, height: popoverMinHeight),
+            contentRect: NSRect(origin: .zero, size: preferredSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: true
@@ -93,28 +107,21 @@ final class MenuPanelController {
 
         hostingController = controller
         menuPanel = panel
-        updateContentSizeIfNeeded(attachedButton: nil)
     }
 
     func updateContentSizeIfNeeded(attachedButton: NSStatusBarButton?) {
         if let attachedButton {
             self.attachedButton = attachedButton
         }
-        guard let controller = hostingController else { return }
-        controller.view.layoutSubtreeIfNeeded()
-        let fitted = controller.sizeThatFits(in: NSSize(width: popoverWidth, height: .greatestFiniteMagnitude))
-        let targetHeight = max(popoverMinHeight, min(popoverMaxHeight, ceil(fitted.height)))
-        let targetSize = NSSize(width: popoverWidth, height: targetHeight)
-
-        if let panel = menuPanel,
-           abs(panel.frame.size.height - targetHeight) > 0.5 {
+        guard let panel = menuPanel else { return }
+        let targetSize = NSSize(width: popoverWidth, height: popoverPreferredHeight)
+        if panel.frame.size != targetSize {
             var frame = panel.frame
             let anchoredTop = frame.maxY
             frame.size = targetSize
             frame.origin.y = anchoredTop - frame.size.height
             panel.setFrame(frame, display: true)
         }
-
         if isShown, let button = self.attachedButton {
             alignPanelWindow(to: button)
         }
@@ -127,7 +134,6 @@ final class MenuPanelController {
     ) {
         attachedButton = button
         self.onDidClose = onDidClose
-        updateContentSizeIfNeeded(attachedButton: button)
         alignPanelWindow(to: button)
         menuPanel?.orderFrontRegardless()
         startOutsideClickMonitoring()

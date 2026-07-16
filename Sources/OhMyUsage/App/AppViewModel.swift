@@ -36,8 +36,11 @@ final class AppViewModel {
     let providerFactory: any ProviderFactorying
     @ObservationIgnored private let localSessionRefreshCoordinator: LocalSessionRefreshCoordinator
     @ObservationIgnored private let localUsageHistoryRepository: LocalUsageHistoryRepository
-    @ObservationIgnored private let usageAnalyticsRefreshCoordinator: UsageAnalyticsRefreshCoordinator
-    @ObservationIgnored let menuBarUsageAnalyticsCoordinator: MenuBarUsageAnalyticsCoordinator
+    @ObservationIgnored var usageAnalyticsRefreshCoordinator: UsageAnalyticsRefreshCoordinator?
+    @ObservationIgnored let usageAnalyticsIndexLifecycleManager = UsageAnalyticsIndexLifecycleManager()
+    @ObservationIgnored private let usageAnalyticsRefreshCoordinatorFactory: () -> UsageAnalyticsRefreshCoordinator
+    @ObservationIgnored var menuBarUsageAnalyticsCoordinator: MenuBarUsageAnalyticsCoordinator?
+    @ObservationIgnored let menuBarUsageAnalyticsCoordinatorFactory: () -> MenuBarUsageAnalyticsCoordinator
     @ObservationIgnored var refreshScheduler: ProviderRefreshScheduler?
     @ObservationIgnored let providerRefreshCoordinator: AppProviderRefreshCoordinator
     @ObservationIgnored let installedAppVersionResolver: (String) -> String
@@ -191,8 +194,8 @@ final class AppViewModel {
         set { sessionStore.providerState.localUsageHistoryVersion = newValue }
     }
     var usageAnalyticsFilter = UsageAnalyticsFilter()
-    private(set) var usageAnalyticsSnapshot = UsageAnalyticsSnapshot.empty(filter: UsageAnalyticsFilter())
-    private(set) var usageAnalyticsLoading = false
+    var usageAnalyticsSnapshot = UsageAnalyticsSnapshot.empty(filter: UsageAnalyticsFilter())
+    var usageAnalyticsLoading = false
     var menuBarUsageAnalyticsSummary = UsageAnalyticsMenuBarSummary.empty()
     private(set) var menuPanelVisible: Bool {
         get { sessionStore.menuPanelVisible }
@@ -261,8 +264,14 @@ final class AppViewModel {
         providerFactory: (any ProviderFactorying)? = nil,
         keychain: KeychainService = KeychainService(),
         localUsageHistoryRepository: LocalUsageHistoryRepository = LocalUsageHistoryRepository(),
-        usageAnalyticsRefreshCoordinator: UsageAnalyticsRefreshCoordinator = UsageAnalyticsRefreshCoordinator(),
-        menuBarUsageAnalyticsCoordinator: MenuBarUsageAnalyticsCoordinator = MenuBarUsageAnalyticsCoordinator(),
+        usageAnalyticsRefreshCoordinator: UsageAnalyticsRefreshCoordinator? = nil,
+        usageAnalyticsRefreshCoordinatorFactory: @escaping () -> UsageAnalyticsRefreshCoordinator = {
+            UsageAnalyticsRefreshCoordinator()
+        },
+        menuBarUsageAnalyticsCoordinator: MenuBarUsageAnalyticsCoordinator? = nil,
+        menuBarUsageAnalyticsCoordinatorFactory: @escaping () -> MenuBarUsageAnalyticsCoordinator = {
+            MenuBarUsageAnalyticsCoordinator()
+        },
         browserCredentialService: BrowserCredentialService = BrowserCredentialService(),
         statusBarNotificationCenter: NotificationCenter = .default,
         updateInstallBufferDelaySeconds: TimeInterval = 2,
@@ -314,7 +323,9 @@ final class AppViewModel {
         self.providerFactory = resolvedProviderFactory
         self.localUsageHistoryRepository = localUsageHistoryRepository
         self.usageAnalyticsRefreshCoordinator = usageAnalyticsRefreshCoordinator
+        self.usageAnalyticsRefreshCoordinatorFactory = usageAnalyticsRefreshCoordinatorFactory
         self.menuBarUsageAnalyticsCoordinator = menuBarUsageAnalyticsCoordinator
+        self.menuBarUsageAnalyticsCoordinatorFactory = menuBarUsageAnalyticsCoordinatorFactory
         self.localSessionRefreshCoordinator = LocalSessionRefreshCoordinator(
             signalSource: localSessionSignalMonitor
         )
@@ -360,8 +371,14 @@ final class AppViewModel {
         providerFactory: (any ProviderFactorying)? = nil,
         keychain: KeychainService = KeychainService(),
         localUsageHistoryRepository: LocalUsageHistoryRepository = LocalUsageHistoryRepository(),
-        usageAnalyticsRefreshCoordinator: UsageAnalyticsRefreshCoordinator = UsageAnalyticsRefreshCoordinator(),
-        menuBarUsageAnalyticsCoordinator: MenuBarUsageAnalyticsCoordinator = MenuBarUsageAnalyticsCoordinator(),
+        usageAnalyticsRefreshCoordinator: UsageAnalyticsRefreshCoordinator? = nil,
+        usageAnalyticsRefreshCoordinatorFactory: @escaping () -> UsageAnalyticsRefreshCoordinator = {
+            UsageAnalyticsRefreshCoordinator()
+        },
+        menuBarUsageAnalyticsCoordinator: MenuBarUsageAnalyticsCoordinator? = nil,
+        menuBarUsageAnalyticsCoordinatorFactory: @escaping () -> MenuBarUsageAnalyticsCoordinator = {
+            MenuBarUsageAnalyticsCoordinator()
+        },
         browserCredentialService: BrowserCredentialService = BrowserCredentialService(),
         statusBarNotificationCenter: NotificationCenter = .default,
         updateInstallBufferDelaySeconds: TimeInterval = 2,
@@ -402,7 +419,9 @@ final class AppViewModel {
         self.providerFactory = resolvedProviderFactory
         self.localUsageHistoryRepository = localUsageHistoryRepository
         self.usageAnalyticsRefreshCoordinator = usageAnalyticsRefreshCoordinator
+        self.usageAnalyticsRefreshCoordinatorFactory = usageAnalyticsRefreshCoordinatorFactory
         self.menuBarUsageAnalyticsCoordinator = menuBarUsageAnalyticsCoordinator
+        self.menuBarUsageAnalyticsCoordinatorFactory = menuBarUsageAnalyticsCoordinatorFactory
         self.localSessionRefreshCoordinator = LocalSessionRefreshCoordinator(
             signalSource: localSessionSignalMonitor
         )
@@ -732,7 +751,15 @@ final class AppViewModel {
     }
 
     func refreshUsageAnalyticsIfNeeded(force: Bool = false) {
-        usageAnalyticsRefreshCoordinator.refreshUsageAnalyticsIfNeeded(
+        let coordinator: UsageAnalyticsRefreshCoordinator
+        if let usageAnalyticsRefreshCoordinator {
+            coordinator = usageAnalyticsRefreshCoordinator
+        } else {
+            let created = usageAnalyticsRefreshCoordinatorFactory()
+            usageAnalyticsRefreshCoordinator = created
+            coordinator = created
+        }
+        coordinator.refreshUsageAnalyticsIfNeeded(
             filter: usageAnalyticsFilter,
             currentSnapshotFilter: usageAnalyticsSnapshot.filter,
             claudeAllConfigDirs: usageAnalyticsClaudeAllConfigDirs(),

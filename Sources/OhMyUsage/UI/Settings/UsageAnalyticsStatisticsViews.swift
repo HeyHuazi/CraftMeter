@@ -2,7 +2,7 @@ import SwiftUI
 
 /**
  * [INPUT]: 依赖 UsageMetricTotals、SettingsTheme、模型品牌展示元数据与统计页共享格式化函数。
- * [OUTPUT]: 对外提供 UsagePieItem、UsageStatsTableRow、UsagePieAndTableView 及其饼图和表格渲染组件。
+ * [OUTPUT]: 对外提供 UsagePieItem、UsageStatsTableRow、UsagePieAndTableView，以及包含模型费用/定价状态的环形图和明细行。
  * [POS]: Settings 使用统计的维度可视化组件；承载紧凑图例、环形图和明细行，不负责选择统计维度。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -283,8 +283,11 @@ private struct UsageStatsTableView: View {
                 compactMetric(title: "总Token", tokenText(row.totals.totalTokens))
                 compactMetric(title: "输入", tokenText(row.totals.inputTokens))
                 compactMetric(title: "输出", tokenText(row.totals.outputTokens))
+                compactMetric(title: "推理", tokenText(row.totals.reasoningTokens))
                 compactMetric(title: "缓存命中", tokenText(row.totals.cacheReadTokens))
                 compactMetric(title: "缓存写入", tokenText(row.totals.cacheWriteTokens))
+                compactMetric(title: "费用", costText(row.totals))
+                compactMetric(title: "价格", pricingStateText(row.totals.pricingState))
                 compactMetric(title: "缓存率", percentTextFixed(row.totals.cacheRate), fixedWidth: rateColumnWidth)
                 compactMetric(title: "成功率", percentTextFixed(row.totals.successRate), fixedWidth: rateColumnWidth)
             }
@@ -311,6 +314,16 @@ private struct UsageStatsTableView: View {
         }
         .frame(width: fixedWidth, alignment: .leading)
         .frame(maxWidth: fixedWidth == nil ? .infinity : nil, alignment: .leading)
+    }
+
+    private func pricingStateText(_ state: UsagePricingState) -> String {
+        switch state {
+        case .reported: return "日志报告"
+        case .estimated: return "Models.dev"
+        case .mixed: return "混合"
+        case .partial: return "部分定价"
+        case .unknown: return "未知"
+        }
     }
 }
 

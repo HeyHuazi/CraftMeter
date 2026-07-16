@@ -42,7 +42,7 @@ final class ExtendedLocalUsageScanner {
             case .gemini, .qwen:
                 return parseGeminiLikeFile(path: file.path, root: root, source: source, since: since)
             case .craftAgent:
-                return parseCraftSession(path: file.path, since: since).map { [$0] } ?? []
+                return recordForCraftSession(path: file.path, root: root, since: since).map { [$0] } ?? []
             }
         }
     }
@@ -167,7 +167,11 @@ final class ExtendedLocalUsageScanner {
         return records
     }
 
-    private func parseCraftSession(path: String, since: Date) -> UsageAnalyticsRecord? {
+    func recordForCraftSession(path: String, root: String, since: Date) -> UsageAnalyticsRecord? {
+        parseCraftSession(path: path, root: root, since: since)
+    }
+
+    private func parseCraftSession(path: String, root: String, since: Date) -> UsageAnalyticsRecord? {
         guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
         let lines = text.split(whereSeparator: \.isNewline)
         guard let first = lines.first,
@@ -191,7 +195,7 @@ final class ExtendedLocalUsageScanner {
         let project = Self.projectName(
             cwd: Self.string(meta["workingDirectory"]) ?? Self.string(meta["cwd"]),
             filePath: path,
-            root: rootOverrides[.craftAgent] ?? Source.craftAgent.rootPath
+            root: root
         )
         let costCents = Self.double(meta["costCents"])
         return UsageAnalyticsRecord(

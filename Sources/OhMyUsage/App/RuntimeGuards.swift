@@ -65,6 +65,8 @@ final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
     private let firstLaunchExperienceStore: any FirstLaunchExperienceStoring = FirstLaunchExperienceStore()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let launchInterval = AppPerformanceTracer.begin("ApplicationLaunch")
+        defer { AppPerformanceTracer.end(launchInterval) }
         // Ensure app stays menu-bar only even if started from terminal context.
         applyBundledAppIcon()
         AppFonts.registerBundledFonts()
@@ -78,7 +80,9 @@ final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
 
         startActivationBridgeObservation()
         let viewModel = AppViewModel()
+        AppPerformanceTracer.event("ViewModelEssentialReady")
         statusBarController = StatusBarController(viewModel: viewModel)
+        AppPerformanceTracer.event("StatusBarReady")
         if !presentPostUpdateReleaseNotesIfNeeded(currentVersion: viewModel.currentAppVersion) {
             presentFirstLaunchExperienceIfNeeded()
         }

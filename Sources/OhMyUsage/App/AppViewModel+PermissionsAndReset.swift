@@ -94,6 +94,10 @@ extension AppViewModel {
                     self.didRunClaudeAutoCaptureCompaction = false
                     self.claudeSwitchFeedback.removeAll()
                     self.claudeOAuthImportState = nil
+                    self.usageAnalyticsRefreshCoordinator?.reset()
+                    self.usageAnalyticsRefreshCoordinator = nil
+                    self.menuBarUsageAnalyticsCoordinator?.reset()
+                    self.menuBarUsageAnalyticsCoordinator = nil
                 },
                 clearInMemoryState: {
                     self.snapshots.removeAll()
@@ -102,6 +106,9 @@ extension AppViewModel {
                     self.activeAlerts.removeAll()
                     self.thirdPartyBalanceBaselineTracker.removeAll()
                     self.thirdPartyBalanceBaselineStore.reset()
+                    self.usageAnalyticsSnapshot = .empty(filter: self.usageAnalyticsFilter)
+                    self.usageAnalyticsLoading = false
+                    self.menuBarUsageAnalyticsSummary = .empty()
                     self.lastUpdatedAt = nil
                 },
                 resetPersistentState: {
@@ -112,6 +119,7 @@ extension AppViewModel {
                     self.codexSlotStore.reset()
                     self.claudeProfileStore.reset()
                     self.claudeSlotStore.reset()
+                    self.usageAnalyticsIndexLifecycleManager.resetDerivedAnalyticsFiles()
                     _ = self.resetConfiguration(showFeedback: true)
                 },
                 restoreDefaultState: {

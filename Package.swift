@@ -92,6 +92,7 @@ let package = Package(
                 "OhMyUsageBootstrap"
             ],
             exclude: [
+                "CLAUDE.md",
                 "Fixtures"
             ]
         )

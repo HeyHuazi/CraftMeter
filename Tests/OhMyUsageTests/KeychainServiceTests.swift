@@ -218,7 +218,7 @@ final class KeychainServiceTests: XCTestCase {
         XCTAssertEqual(store.readToken(service: KeychainService.defaultServiceName, account: "legacy-account"), "legacy-token")
         XCTAssertEqual(recorder.counts.interactiveReadData, 1)
         XCTAssertEqual(recorder.counts.interactiveReadAll, 0)
-        XCTAssertEqual(recorder.counts.interactiveSaveData, 1)
+        XCTAssertEqual(recorder.counts.interactiveSaveData, 0)
         XCTAssertEqual(recorder.latestSavedVaultSnapshot?[looseKey], "loose-token")
         XCTAssertEqual(recorder.latestSavedVaultSnapshot?[legacyKey], "legacy-token")
     }
@@ -329,6 +329,86 @@ final class KeychainServiceTests: XCTestCase {
         )
         XCTAssertEqual(recorder.counts.readData, 0)
         XCTAssertEqual(recorder.counts.readAll, 0)
+    }
+
+    func testPrepareSecureStoreAccessIsIdempotentAfterSuccess() {
+        let defaults = makeDefaults()
+        let recorder = KeychainReadRecorder()
+        let adapter = KeychainService.SecureStoreAdapter(
+            readData: { service, account, interactive in
+                recorder.recordReadData(service: service, account: account, interactive: interactive)
+                return nil
+            },
+            readAll: { service, interactive in
+                recorder.recordReadAll(service: service, interactive: interactive)
+                return nil
+            },
+            saveData: { data, service, account, interactive in
+                recorder.recordSaveData(data: data, service: service, account: account, interactive: interactive)
+                return true
+            },
+            deleteItem: { _, _ in },
+            deleteAll: { _ in }
+        )
+
+        let store = KeychainService(
+            defaults: defaults,
+            forceSecureStore: true,
+            secureStore: adapter
+        )
+
+        XCTAssertTrue(store.prepareSecureStoreAccess())
+        XCTAssertTrue(store.prepareSecureStoreAccess())
+
+        XCTAssertEqual(recorder.counts.readData, 2)
+        XCTAssertEqual(recorder.counts.saveData, 1)
+        XCTAssertEqual(recorder.counts.interactiveReadData, 1)
+        XCTAssertEqual(recorder.counts.interactiveSaveData, 0)
+    }
+
+    func testPrepareSecureStoreAccessUsesNonInteractiveVaultWhenAvailable() throws {
+        let defaults = makeDefaults()
+        let recorder = KeychainReadRecorder()
+        let snapshot = [
+            "\(KeychainService.defaultServiceName)::cached-account": "cached-token"
+        ]
+        let encodedSnapshot = try JSONEncoder().encode(snapshot)
+        let adapter = KeychainService.SecureStoreAdapter(
+            readData: { service, account, interactive in
+                recorder.recordReadData(service: service, account: account, interactive: interactive)
+                guard service == KeychainService.defaultServiceName,
+                      account == "__credential_vault__",
+                      !interactive else {
+                    return nil
+                }
+                return encodedSnapshot
+            },
+            readAll: { service, interactive in
+                recorder.recordReadAll(service: service, interactive: interactive)
+                return nil
+            },
+            saveData: { data, service, account, interactive in
+                recorder.recordSaveData(data: data, service: service, account: account, interactive: interactive)
+                return true
+            },
+            deleteItem: { _, _ in },
+            deleteAll: { _ in }
+        )
+
+        let store = KeychainService(
+            defaults: defaults,
+            forceSecureStore: true,
+            secureStore: adapter
+        )
+
+        XCTAssertTrue(store.prepareSecureStoreAccess())
+        XCTAssertEqual(
+            store.readToken(service: KeychainService.defaultServiceName, account: "cached-account"),
+            "cached-token"
+        )
+        XCTAssertEqual(recorder.counts.readData, 1)
+        XCTAssertEqual(recorder.counts.interactiveReadData, 0)
+        XCTAssertEqual(recorder.counts.saveData, 0)
     }
 
     private func makeDefaults() -> UserDefaults {

@@ -143,18 +143,18 @@ public enum UsageAnalyticsFilterMode: String, CaseIterable, Identifiable, Codabl
 }
 
 public enum UsageAnalyticsRange: String, CaseIterable, Identifiable, Codable, Sendable {
-    case last24Hours
-    case last7Days
-    case last30Days
+    case today
+    case week
+    case month
     case all
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
-        case .last24Hours: return "最近24小时"
-        case .last7Days: return "7天"
-        case .last30Days: return "30天"
+        case .today: return "今天"
+        case .week: return "本周"
+        case .month: return "本月"
         case .all: return "全部"
         }
     }
@@ -178,7 +178,7 @@ public struct UsageAnalyticsFilter: Codable, Equatable, Hashable, Sendable {
         selectedProjectID: String? = nil,
         selectedFacetKind: UsageAnalyticsFacetKind? = nil,
         selectedFacetValue: String? = nil,
-        range: UsageAnalyticsRange = .last30Days
+        range: UsageAnalyticsRange = .month
     ) {
         self.mode = mode
         self.selectedModelID = selectedModelID

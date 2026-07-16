@@ -25,6 +25,7 @@ scripts/package_dmg.sh - development/preview/release 三态 DMG/ZIP 构建、Swi
 
 - 实时额度使用 `UsageSnapshot`；历史消费使用 `UsageAnalyticsSnapshot`，禁止混用。
 - Scanner 只提取统计事实；Aggregator 必须是纯函数；SwiftUI 不触碰日志。
+- 历史事实索引只保存 enrichment 前 records 与安全 cursor/checkpoint；offset 与 events 必须事务提交，原始 JSONL 正文不得进入派生库。
 - 未定价是 `unknown`，不能展示成零成本。
 - 不保存 prompt、assistant content、tool input/result 或附件正文。
 - 新运行时数据写入 `~/Library/Application Support/CraftMeter`；旧 OhMyUsage 只读迁移。
@@ -34,7 +35,9 @@ scripts/package_dmg.sh - development/preview/release 三态 DMG/ZIP 构建、Swi
 
 ```text
 Official/Relay -> Provider Runtime -> UsageSnapshot -> AppSessionStore -> Menu Bar
-Local Logs -> Scanners -> UsageAnalyticsRecord/Facets -> Aggregator -> Cache -> Settings
+Local Logs -> Scanners/Incremental Adapters -> UsageAnalyticsRecord/Facets
+                                             \-> Fingerprint-matched SQLite Facts
+                                             \-> Repository indexed-first/legacy fallback -> Pricing -> Aggregator -> Cache -> Settings
 ```
 
 ## 文档回环

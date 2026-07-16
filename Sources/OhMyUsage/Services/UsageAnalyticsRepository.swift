@@ -2,13 +2,28 @@ import Foundation
 import OhMyUsageApplication
 
 /**
- * [INPUT]: Coordinates CCSwitch/local scanners and a provider-aware model pricing catalog for Claude, Codex, Kimi, Gemini, Qwen, and Craft Agents.
- * [OUTPUT]: Returns price-enriched snapshots, natural/all-period menu bar summaries, plus a complete source fingerprint for cache validation.
- * [POS]: OhMyUsage Services analytics repository; IO/enrichment orchestration only, with pricing math and aggregation delegated to OhMyUsageApplication.
+ * [INPUT]: Coordinates fingerprint-gated indexed facts, legacy CCSwitch/local scanners, and a provider-aware model pricing catalog for every analytics source.
+ * [OUTPUT]: Returns price-enriched snapshots and natural/all-period menu summaries, preferring a matching complete index generation with automatic legacy fallback.
+ * [POS]: OhMyUsage Services analytics read boundary; selects indexed/legacy facts, then delegates shared pricing math and aggregation to OhMyUsageApplication.
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
 final class UsageAnalyticsRepository: @unchecked Sendable {
+    enum RecordReadPath: Equatable, Sendable {
+        case indexed
+        case legacy
+    }
+
+    typealias IndexedRecordsLoader = @Sendable (
+        _ since: Date,
+        _ until: Date,
+        _ sourceFingerprint: UsageAnalyticsSourceFingerprint
+    ) throws -> [UsageAnalyticsRecord]
+    typealias LegacyRecordsLoader = @Sendable (
+        _ since: Date,
+        _ until: Date,
+        _ claudeAllConfigDirs: [String]
+    ) -> (records: [UsageAnalyticsRecord], diagnostics: [String])
     typealias CCSwitchSourceFingerprintProvider = (_ ccSwitchReader: CCSwitchUsageLogReader) -> UsageAnalyticsFileFingerprint
     typealias LocalSourceFingerprintProvider = (
         _ claudeAllConfigDirs: [String]
@@ -85,6 +100,9 @@ final class UsageAnalyticsRepository: @unchecked Sendable {
     private let ccSwitchSourceFingerprintProvider: CCSwitchSourceFingerprintProvider
     private let localSourceFingerprintProvider: LocalSourceFingerprintProvider
     private let pricingCatalog: ModelPricingCatalog
+    private let indexedRecordsLoader: IndexedRecordsLoader?
+    private let legacyRecordsLoader: LegacyRecordsLoader?
+    private let onRecordReadPath: (@Sendable (RecordReadPath) -> Void)?
 
     init(
         ccSwitchReader: CCSwitchUsageLogReader = CCSwitchUsageLogReader(),
@@ -92,7 +110,11 @@ final class UsageAnalyticsRepository: @unchecked Sendable {
         nowProvider: @escaping () -> Date = Date.init,
         ccSwitchSourceFingerprintProvider: @escaping CCSwitchSourceFingerprintProvider = UsageAnalyticsRepository.defaultCCSwitchSourceFingerprint,
         localSourceFingerprintProvider: @escaping LocalSourceFingerprintProvider = UsageAnalyticsRepository.defaultLocalSourceFingerprint,
-        pricingCatalog: ModelPricingCatalog = ModelPricingCatalog()
+        pricingCatalog: ModelPricingCatalog = ModelPricingCatalog(),
+        indexLifecycleManager: UsageAnalyticsIndexLifecycleManager? = UsageAnalyticsIndexLifecycleManager(),
+        indexedRecordsLoader: IndexedRecordsLoader? = nil,
+        legacyRecordsLoader: LegacyRecordsLoader? = nil,
+        onRecordReadPath: (@Sendable (RecordReadPath) -> Void)? = nil
     ) {
         self.ccSwitchReader = ccSwitchReader
         self.calendar = calendar
@@ -100,54 +122,61 @@ final class UsageAnalyticsRepository: @unchecked Sendable {
         self.ccSwitchSourceFingerprintProvider = ccSwitchSourceFingerprintProvider
         self.localSourceFingerprintProvider = localSourceFingerprintProvider
         self.pricingCatalog = pricingCatalog
+        if let indexedRecordsLoader {
+            self.indexedRecordsLoader = indexedRecordsLoader
+        } else if let indexLifecycleManager {
+            self.indexedRecordsLoader = { since, until, fingerprint in
+                let store = try indexLifecycleManager.openCompleteStore(matching: fingerprint)
+                return try store.records(since: since, until: until)
+            }
+        } else {
+            self.indexedRecordsLoader = nil
+        }
+        self.legacyRecordsLoader = legacyRecordsLoader
+        self.onRecordReadPath = onRecordReadPath
         self.pricingCatalog.refreshIfNeeded()
     }
 
     func snapshot(
         filter: UsageAnalyticsFilter,
-        claudeAllConfigDirs: [String] = []
+        claudeAllConfigDirs: [String] = [],
+        sourceFingerprint providedSourceFingerprint: UsageAnalyticsSourceFingerprint? = nil
     ) -> UsageAnalyticsSnapshot {
         let now = nowProvider()
         let interval = UsageAnalyticsAggregator.rangeInterval(filter.range, calendar: calendar, now: now)
-        var diagnostics: [String] = []
-        var records: [UsageAnalyticsRecord] = []
-
-        let ccSwitchResult = ccSwitchReader.readUsageLogs(since: interval.start, until: interval.end)
-        records.append(contentsOf: ccSwitchResult.records.map(\.analyticsRecord))
-        diagnostics.append(contentsOf: ccSwitchResult.diagnostics)
-
-        let localResult = readLocalRecords(
+        let sourceFingerprint = providedSourceFingerprint
+            ?? sourceFingerprint(claudeAllConfigDirs: claudeAllConfigDirs)
+        let result = readRecords(
             since: interval.start,
+            until: interval.end,
+            sourceFingerprint: sourceFingerprint,
             claudeAllConfigDirs: claudeAllConfigDirs
         )
-        records.append(contentsOf: localResult.records)
-        diagnostics.append(contentsOf: localResult.diagnostics)
-
-        records = pricingCatalog.enrich(records)
+        let records = pricingCatalog.enrich(result.records)
         return UsageAnalyticsAggregator.snapshot(
             records: records,
             filter: filter,
             calendar: calendar,
             now: now,
-            diagnostics: diagnostics
+            diagnostics: result.diagnostics
         )
     }
 
     func menuBarSummary(
-        claudeAllConfigDirs: [String] = []
+        claudeAllConfigDirs: [String] = [],
+        sourceFingerprint providedSourceFingerprint: UsageAnalyticsSourceFingerprint? = nil
     ) -> UsageAnalyticsMenuBarSummary {
         let now = nowProvider()
         let scanStart = Date.distantPast
-        var records: [UsageAnalyticsRecord] = []
-
-        let ccSwitchResult = ccSwitchReader.readUsageLogs(since: scanStart, until: now)
-        records.append(contentsOf: ccSwitchResult.records.map(\.analyticsRecord))
-        records.append(contentsOf: readLocalRecords(
+        let sourceFingerprint = providedSourceFingerprint
+            ?? sourceFingerprint(claudeAllConfigDirs: claudeAllConfigDirs)
+        let result = readRecords(
             since: scanStart,
+            until: now,
+            sourceFingerprint: sourceFingerprint,
             claudeAllConfigDirs: claudeAllConfigDirs
-        ).records)
-
-        records = pricingCatalog.enrich(records)
+        )
+        let records = pricingCatalog.enrich(result.records)
         return UsageAnalyticsAggregator.menuBarSummary(
             records: records,
             calendar: calendar,
@@ -181,6 +210,33 @@ final class UsageAnalyticsRepository: @unchecked Sendable {
 
     static func clearSourceFingerprintCacheForTesting() {
         localSourceFingerprintCache.removeAll()
+    }
+
+    private func readRecords(
+        since: Date,
+        until: Date,
+        sourceFingerprint: UsageAnalyticsSourceFingerprint,
+        claudeAllConfigDirs: [String]
+    ) -> (records: [UsageAnalyticsRecord], diagnostics: [String]) {
+        if let indexedRecordsLoader,
+           let indexed = try? indexedRecordsLoader(since, until, sourceFingerprint) {
+            onRecordReadPath?(.indexed)
+            return (indexed, [])
+        }
+        onRecordReadPath?(.legacy)
+        if let legacyRecordsLoader {
+            return legacyRecordsLoader(since, until, claudeAllConfigDirs)
+        }
+
+        var records: [UsageAnalyticsRecord] = []
+        var diagnostics: [String] = []
+        let ccSwitchResult = ccSwitchReader.readUsageLogs(since: since, until: until)
+        records.append(contentsOf: ccSwitchResult.records.map(\.analyticsRecord))
+        diagnostics.append(contentsOf: ccSwitchResult.diagnostics)
+        let localResult = readLocalRecords(since: since, claudeAllConfigDirs: claudeAllConfigDirs)
+        records.append(contentsOf: localResult.records)
+        diagnostics.append(contentsOf: localResult.diagnostics)
+        return (records, diagnostics)
     }
 
     private func readLocalRecords(

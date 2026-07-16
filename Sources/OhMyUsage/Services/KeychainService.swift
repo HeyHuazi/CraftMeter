@@ -6,7 +6,7 @@ import Security
 
 /**
  * [INPUT]: Reads and writes provider credentials through the macOS Keychain or isolated test storage.
- * [OUTPUT]: Exposes CraftMeter's credential vault and one-way migration from historical OhMyUsage services.
+ * [OUTPUT]: Exposes CraftMeter's credential vault, idempotent secure-store preparation, and one-way migration from historical OhMyUsage services.
  * [POS]: OhMyUsage Services security boundary; secrets never enter analytics or application logs.
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -308,7 +308,19 @@ final class KeychainService: @unchecked Sendable {
     }
 
     func prepareSecureStoreAccess() -> Bool {
-        let vaultSnapshot = readVaultSnapshotFromSecureStore(interactive: true)
+        guard !useFileStorage else {
+            return true
+        }
+
+        lock.lock()
+        let alreadyPrepared = secureVaultLoaded || !tokenCache.isEmpty || hasPreparedSecureStoreAccess
+        lock.unlock()
+        guard !alreadyPrepared else {
+            return true
+        }
+
+        let vaultSnapshot = readVaultSnapshotFromSecureStore(interactive: false)
+            ?? readVaultSnapshotFromSecureStore(interactive: true)
         if let vaultSnapshot {
             mergeIntoCache(vaultSnapshot)
         }
@@ -329,7 +341,9 @@ final class KeychainService: @unchecked Sendable {
         let needsPersist = !hasVault || !currentItems.isEmpty || !(legacyMigration?.items.isEmpty ?? true)
         let didPersistSnapshot: Bool
         if needsPersist {
-            didPersistSnapshot = persistSecureSnapshot(cachedSnapshot(), interactive: !hasVault)
+            let snapshot = cachedSnapshot()
+            didPersistSnapshot = persistSecureSnapshot(snapshot, interactive: false)
+                || persistSecureSnapshot(snapshot, interactive: true)
         } else {
             didPersistSnapshot = true
         }

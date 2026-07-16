@@ -11,7 +11,10 @@ import OhMyUsageApplication
 @MainActor
 final class MenuBarUsageAnalyticsCoordinator {
     typealias SourceFingerprintLoader = @Sendable ([String]) -> UsageAnalyticsSourceFingerprint
-    typealias SummaryLoader = @Sendable ([String]) -> UsageAnalyticsMenuBarSummary
+    typealias SummaryLoader = @Sendable (
+        _ claudeAllConfigDirs: [String],
+        _ sourceFingerprint: UsageAnalyticsSourceFingerprint
+    ) -> UsageAnalyticsMenuBarSummary
 
     private let sourceFingerprintLoader: SourceFingerprintLoader
     private let summaryLoader: SummaryLoader
@@ -35,9 +38,20 @@ final class MenuBarUsageAnalyticsCoordinator {
         self.sourceFingerprintLoader = sourceFingerprintLoader ?? { directories in
             repository.sourceFingerprint(claudeAllConfigDirs: directories)
         }
-        self.summaryLoader = summaryLoader ?? { directories in
-            repository.menuBarSummary(claudeAllConfigDirs: directories)
+        self.summaryLoader = summaryLoader ?? { directories, fingerprint in
+            repository.menuBarSummary(
+                claudeAllConfigDirs: directories,
+                sourceFingerprint: fingerprint
+            )
         }
+    }
+
+    func reset() {
+        refreshTask?.cancel()
+        refreshTask = nil
+        lastFingerprint = nil
+        lastPeriodAnchor = nil
+        lastValidationAt = nil
     }
 
     func refreshIfNeeded(
@@ -80,7 +94,7 @@ final class MenuBarUsageAnalyticsCoordinator {
             }
 
             let summary = await Task.detached(priority: .utility) {
-                summaryLoader(claudeAllConfigDirs)
+                summaryLoader(claudeAllConfigDirs, fingerprint)
             }.value
             guard !Task.isCancelled else { return }
 

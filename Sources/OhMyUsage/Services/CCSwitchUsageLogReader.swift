@@ -107,6 +107,48 @@ final class CCSwitchUsageLogReader: @unchecked Sendable {
     }
 
     func readUsageLogs(since: Date, until: Date) -> CCSwitchUsageReadResult {
+        readDatabase { database in
+            var diagnostics: [String] = []
+            var records: [CCSwitchUsageRecord] = []
+            if tableExists("proxy_request_logs", database: database) {
+                records.append(contentsOf: readProxyLogs(database: database, since: since, until: until))
+            } else {
+                diagnostics.append("cc-switch 数据库缺少 proxy_request_logs 表")
+            }
+            if tableExists("usage_daily_rollups", database: database) {
+                records.append(contentsOf: readDailyRollups(database: database, since: since, until: until))
+            }
+            return CCSwitchUsageReadResult(records: records, diagnostics: diagnostics)
+        }
+    }
+
+    func readProxyUsageLogs(since: Date, until: Date) -> CCSwitchUsageReadResult {
+        readDatabase { database in
+            guard tableExists("proxy_request_logs", database: database) else {
+                return CCSwitchUsageReadResult(records: [], diagnostics: ["cc-switch 数据库缺少 proxy_request_logs 表"])
+            }
+            return CCSwitchUsageReadResult(
+                records: readProxyLogs(database: database, since: since, until: until),
+                diagnostics: []
+            )
+        }
+    }
+
+    func readDailyUsageRollups(since: Date, until: Date) -> CCSwitchUsageReadResult {
+        readDatabase { database in
+            guard tableExists("usage_daily_rollups", database: database) else {
+                return CCSwitchUsageReadResult(records: [], diagnostics: [])
+            }
+            return CCSwitchUsageReadResult(
+                records: readDailyRollups(database: database, since: since, until: until),
+                diagnostics: []
+            )
+        }
+    }
+
+    private func readDatabase(
+        _ body: (OpaquePointer) -> CCSwitchUsageReadResult
+    ) -> CCSwitchUsageReadResult {
         guard fileManager.fileExists(atPath: databasePath) else {
             return CCSwitchUsageReadResult(
                 records: [],
@@ -123,21 +165,7 @@ final class CCSwitchUsageLogReader: @unchecked Sendable {
             )
         }
         defer { sqlite3_close(database) }
-
-        var diagnostics: [String] = []
-        var records: [CCSwitchUsageRecord] = []
-
-        if tableExists("proxy_request_logs", database: database) {
-            records.append(contentsOf: readProxyLogs(database: database, since: since, until: until))
-        } else {
-            diagnostics.append("cc-switch 数据库缺少 proxy_request_logs 表")
-        }
-
-        if tableExists("usage_daily_rollups", database: database) {
-            records.append(contentsOf: readDailyRollups(database: database, since: since, until: until))
-        }
-
-        return CCSwitchUsageReadResult(records: records, diagnostics: diagnostics)
+        return body(database)
     }
 
     func sourceFingerprint() -> LocalUsageSourceFingerprint {

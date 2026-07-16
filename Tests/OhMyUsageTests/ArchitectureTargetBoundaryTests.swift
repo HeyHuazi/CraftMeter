@@ -4,6 +4,7 @@ import OhMyUsageBootstrap
 import OhMyUsageDomain
 import OhMyUsageFeatures
 import OhMyUsagePresentation
+@testable import OhMyUsage
 import XCTest
 
 final class ArchitectureTargetBoundaryTests: XCTestCase {
@@ -29,13 +30,30 @@ final class ArchitectureTargetBoundaryTests: XCTestCase {
         let rootURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         let maintainedFiles = [
             "Sources/OhMyUsage/App/AppViewModel.swift",
+            "Sources/OhMyUsage/App/AppPerformanceTracer.swift",
+            "Sources/OhMyUsage/App/MenuPanelController.swift",
+            "Sources/OhMyUsage/App/StatusBarController.swift",
+            "Sources/OhMyUsage/App/UsageAnalyticsRefreshCoordinator.swift",
             "Sources/OhMyUsage/App/AppViewModel+StatusBarDisplay.swift",
             "Sources/OhMyUsage/Services/ExtendedLocalUsageScanner.swift",
+            "Sources/OhMyUsage/Services/UsageAnalyticsCCSwitchIndexer.swift",
+            "Sources/OhMyUsage/Services/UsageAnalyticsEventStore.swift",
+            "Sources/OhMyUsage/Services/UsageAnalyticsIndexLifecycleManager.swift",
+            "Sources/OhMyUsage/Services/UsageAnalyticsJSONLCursorReader.swift",
             "Sources/OhMyUsage/Services/UsageAnalyticsRepository.swift",
+            "Sources/OhMyUsage/Services/UsageAnalyticsStatefulJSONLIndexer.swift",
+            "Sources/OhMyUsage/Services/UsageAnalyticsStatelessJSONLIndexer.swift",
             "Sources/OhMyUsageApplication/UsageAnalyticsAggregator.swift",
+            "Sources/OhMyUsageApplication/UsageAnalyticsEventStoreTypes.swift",
             "Sources/OhMyUsageApplication/UsageAnalyticsSnapshotCacheStore.swift",
             "Sources/OhMyUsageApplication/UsageAnalyticsTypes.swift",
-            "Sources/OhMyUsage/UI/Settings/UsageAnalyticsSettingsView.swift"
+            "Sources/OhMyUsage/UI/MenuContentView.swift",
+            "Sources/OhMyUsage/UI/MenuUsageDashboardView.swift",
+            "Sources/OhMyUsage/UI/Presenters/MenuUsageDashboardPresenter.swift",
+            "Sources/OhMyUsage/UI/Settings/SettingsVisualTokens.swift",
+            "Sources/OhMyUsage/UI/Settings/UsageAnalyticsSettingsView.swift",
+            "Sources/OhMyUsage/UI/Support/AppFonts.swift",
+            "Sources/OhMyUsage/UI/Support/AppIconImageProvider.swift"
         ]
 
         for relativePath in maintainedFiles {
@@ -50,6 +68,132 @@ final class ArchitectureTargetBoundaryTests: XCTestCase {
                 )
             }
         }
+    }
+
+    func testMenuSectionsShareOneStableContentViewport() throws {
+        let rootURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let menuContent = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/OhMyUsage/UI/MenuContentView.swift"),
+            encoding: .utf8
+        )
+        let usageDashboard = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/OhMyUsage/UI/MenuUsageDashboardView.swift"),
+            encoding: .utf8
+        )
+        let menuPanelController = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/OhMyUsage/App/MenuPanelController.swift"),
+            encoding: .utf8
+        )
+        let statusBarController = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/OhMyUsage/App/StatusBarController.swift"),
+            encoding: .utf8
+        )
+
+        let menuChromeHeight = SettingsVisualTokens.Menu.panelTopPadding
+            + SettingsVisualTokens.Menu.panelBottomPadding
+            + SettingsVisualTokens.Menu.headerHeight
+            + SettingsVisualTokens.Menu.panelContentSpacing * 2
+            + 28
+        let totalHeight = menuChromeHeight + SettingsVisualTokens.Menu.contentViewportHeight
+
+        XCTAssertEqual(totalHeight, SettingsVisualTokens.Menu.panelPreferredHeight)
+        XCTAssertLessThanOrEqual(totalHeight, SettingsVisualTokens.Menu.panelMaxHeight)
+        XCTAssertTrue(menuContent.contains("@State private var selectedSection: Section = .usage"))
+        XCTAssertTrue(menuContent.contains("selectedSection = .usage"))
+        XCTAssertTrue(menuContent.contains("private func selectUsageRange(_ range: UsageAnalyticsRange)"))
+        XCTAssertTrue(menuContent.contains("viewModel.usageAnalyticsFilter = filter"))
+        XCTAssertTrue(menuContent.contains("onSelectRange: { range in\n                selectUsageRange(range)"))
+        XCTAssertTrue(menuContent.contains("refreshUsageAnalyticsIfNeeded(force: false)"))
+        XCTAssertEqual(menuContent.components(separatedBy: "refreshUsageAnalyticsIfNeeded(force: false)").count - 1, 2)
+        XCTAssertTrue(menuContent.contains("if visible, selectedSection == .usage"))
+        XCTAssertFalse(menuContent.contains(".onAppear {\n            restartClockIfNeeded()\n            viewModel.refreshUsageAnalyticsIfNeeded"))
+        XCTAssertFalse(menuContent.contains(".onChange(of: selectedSection)"))
+        XCTAssertFalse(menuContent.contains(".onChange(of: viewModel.usageAnalyticsFilter)"))
+        XCTAssertFalse(menuContent.contains("if selectedSection == .usage, viewModel.menuPanelVisible"))
+        XCTAssertTrue(menuContent.contains(".frame(height: contentViewportHeight)"))
+        XCTAssertFalse(menuContent.contains("PreferenceKey"))
+        XCTAssertFalse(menuContent.contains("cardsContentHeight"))
+        XCTAssertTrue(usageDashboard.contains("@State private var selectedTrendID: String?"))
+        XCTAssertTrue(usageDashboard.contains("selectedID: selectedTrendID"))
+        XCTAssertTrue(usageDashboard.contains("onSelect: { item in"))
+        XCTAssertTrue(usageDashboard.contains("Text(item.tokensText)"))
+        XCTAssertFalse(usageDashboard.contains("private func trendDetail(_ item: MenuUsageTrendItem)"))
+        XCTAssertFalse(usageDashboard.contains("refreshUsageAnalyticsIfNeeded(force: false)"))
+        XCTAssertTrue(usageDashboard.contains(".frame(maxWidth: .infinity, maxHeight: .infinity)"))
+        XCTAssertTrue(usageDashboard.contains("compactBreakdownControl"))
+        XCTAssertFalse(usageDashboard.contains("Menu {"))
+        XCTAssertFalse(usageDashboard.contains("dashboardViewportHeight"))
+        XCTAssertEqual(MenuUsageBreakdown.allCases, [.model, .project, .client])
+        XCTAssertTrue(menuPanelController.contains("popoverPreferredHeight: CGFloat = 600"))
+        XCTAssertFalse(menuPanelController.contains("sizeThatFits"))
+        XCTAssertFalse(menuPanelController.contains("layoutSubtreeIfNeeded"))
+        let showStart = try XCTUnwrap(menuPanelController.range(of: "func show("))
+        let closeStart = try XCTUnwrap(
+            menuPanelController.range(
+                of: "    func close(",
+                range: showStart.upperBound..<menuPanelController.endIndex
+            )
+        )
+        let showBody = menuPanelController[showStart.lowerBound..<closeStart.lowerBound]
+        XCTAssertFalse(showBody.contains("updateContentSizeIfNeeded(attachedButton: button)"))
+        XCTAssertFalse(statusBarController.contains("refreshMenuBarUsageAnalyticsIfNeeded(force: true)"))
+        XCTAssertFalse(statusBarController.contains("private func showPopover(attachedTo button: NSStatusBarButton) {\n        refreshStatusDisplay()"))
+    }
+
+    func testIncrementalAnalyticsIndexUsesFingerprintGatedFallbackAfterParityCutover() throws {
+        let rootURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let repository = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/OhMyUsage/Services/UsageAnalyticsRepository.swift"),
+            encoding: .utf8
+        )
+        let store = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/OhMyUsage/Services/UsageAnalyticsEventStore.swift"),
+            encoding: .utf8
+        )
+        let indexer = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/OhMyUsage/Services/UsageAnalyticsStatelessJSONLIndexer.swift"),
+            encoding: .utf8
+        )
+        let statefulIndexer = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/OhMyUsage/Services/UsageAnalyticsStatefulJSONLIndexer.swift"),
+            encoding: .utf8
+        )
+
+        let ccSwitchIndexer = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/OhMyUsage/Services/UsageAnalyticsCCSwitchIndexer.swift"),
+            encoding: .utf8
+        )
+
+        let lifecycle = try String(
+            contentsOf: rootURL.appendingPathComponent("Sources/OhMyUsage/Services/UsageAnalyticsIndexLifecycleManager.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(repository.contains("openCompleteStore(matching: fingerprint)"))
+        XCTAssertTrue(repository.contains("if let indexedRecordsLoader"))
+        XCTAssertTrue(repository.contains("onRecordReadPath?(.legacy)"))
+        XCTAssertFalse(repository.contains("UsageAnalyticsCCSwitchIndexer"))
+        XCTAssertFalse(repository.contains("UsageAnalyticsStatelessJSONLIndexer"))
+        XCTAssertFalse(repository.contains("UsageAnalyticsStatefulJSONLIndexer"))
+        XCTAssertFalse(repository.contains("UsageAnalyticsCraftSessionIndexer"))
+        XCTAssertTrue(store.contains("BEGIN IMMEDIATE TRANSACTION"))
+        XCTAssertTrue(store.contains("try beforeCursorCommit?()"))
+        XCTAssertTrue(indexer.contains("case .claude"))
+        XCTAssertTrue(indexer.contains("case .gemini, .qwen"))
+        XCTAssertFalse(indexer.contains("case .codex:\n            return lines"))
+        XCTAssertTrue(statefulIndexer.contains("configuration.source == .codex || configuration.source == .kimi"))
+        XCTAssertTrue(statefulIndexer.contains("replaceExistingFileRecords: true"))
+        XCTAssertTrue(statefulIndexer.contains("checkpoint: try JSONEncoder().encode(parsed.1)"))
+        XCTAssertTrue(ccSwitchIndexer.contains("previousCheckpoint.proxyHighWatermark?.addingTimeInterval(-configuration.overlap)"))
+        XCTAssertTrue(ccSwitchIndexer.contains("commitCCSwitchIngest"))
+        XCTAssertTrue(ccSwitchIndexer.contains("rollupRefreshDays"))
+        XCTAssertTrue(lifecycle.contains("sourceFingerprint: UsageAnalyticsSourceFingerprint"))
+        XCTAssertTrue(lifecycle.contains("case staleGeneration"))
+        XCTAssertTrue(lifecycle.contains("manifest.sourceFingerprint != sourceFingerprint"))
+        XCTAssertTrue(lifecycle.contains("publishCompleteGeneration"))
+        XCTAssertTrue(lifecycle.contains(".staging.sqlite"))
+        XCTAssertTrue(lifecycle.contains("quarantineActiveIndex"))
+        XCTAssertTrue(lifecycle.contains("resetDerivedAnalyticsFiles"))
     }
 
     func testNonExecutableTargetsKeepDependencyDirection() throws {

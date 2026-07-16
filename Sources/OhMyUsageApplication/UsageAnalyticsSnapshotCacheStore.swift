@@ -1,9 +1,9 @@
 import Foundation
 
 /**
- * [INPUT]: Persists UsageAnalyticsSnapshot values keyed by filter and source fingerprint.
- * [OUTPUT]: Provides schema-versioned cache-first reads with temporal and fingerprint validation.
- * [POS]: OhMyUsageApplication cache boundary; stale or incompatible payloads are safely ignored.
+ * [INPUT]: 接收按 filter/fingerprint 组织的 UsageAnalyticsSnapshot，并依赖 Foundation 文件系统与串行 utility 持久化队列。
+ * [OUTPUT]: 提供 schema-version 6 的可延迟缓存恢复、同步内存读取、自然周期新鲜度校验，以及 snapshot JSON + 轻量 validation manifest 的后台原子写入。
+ * [POS]: OhMyUsageApplication 的历史快照缓存边界；MainActor 只提交/读取不可变快照，校验只写 KB 级 sidecar，不重编码或重写大型 snapshot payload。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
@@ -86,39 +86,132 @@ public struct UsageAnalyticsCacheEntry: Codable, Equatable, Sendable {
 }
 
 public final class UsageAnalyticsSnapshotCacheStore: @unchecked Sendable {
-    private static let currentSchemaVersion = 4
+    private static let currentSchemaVersion = 6
 
     private struct CachePayload: Codable {
         var schemaVersion: Int
         var entries: [UsageAnalyticsCacheEntry]
     }
 
+    private struct ValidationMetadata: Codable, Equatable {
+        var filter: UsageAnalyticsFilter
+        var sourceFingerprint: UsageAnalyticsSourceFingerprint?
+        var refreshedAt: Date
+        var lastFingerprintCheckedAt: Date?
+    }
+
+    private struct MetadataPayload: Codable {
+        var schemaVersion: Int
+        var entries: [ValidationMetadata]
+    }
+
     private let fileManager: FileManager
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private let fileURL: URL
+    private let metadataFileURL: URL
     private let nowProvider: () -> Date
     private let maxEntries: Int
     private let lock = NSLock()
+    private let persistenceQueue = DispatchQueue(
+        label: "com.heyhuazi.craftmeter.usage-analytics-cache",
+        qos: .utility
+    )
     private var entries: [UsageAnalyticsFilter: UsageAnalyticsCacheEntry] = [:]
+    private var restored = false
     private var lastPersistedCacheData: Data?
     private var lastPersistedEntries: [UsageAnalyticsCacheEntry]?
+    private var lastPersistedMetadataData: Data?
+    private var lastPersistedMetadata: [ValidationMetadata]?
 
     public init(
         baseDirectoryURL: URL? = nil,
         fileManager: FileManager = .default,
         nowProvider: @escaping () -> Date = Date.init,
-        maxEntries: Int? = nil
+        maxEntries: Int? = nil,
+        restoreImmediately: Bool = true
     ) {
         self.fileManager = fileManager
         self.nowProvider = nowProvider
         self.maxEntries = max(1, maxEntries ?? RuntimeDiagnosticsLimits.usageAnalyticsCacheMaxEntries)
         let rootDirectory = baseDirectoryURL
             ?? fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        self.fileURL = rootDirectory
+        let cacheDirectory = rootDirectory
             .appendingPathComponent("CraftMeter", isDirectory: true)
+        self.fileURL = cacheDirectory
             .appendingPathComponent("usage_analytics_cache.json")
-        restoreFromDisk()
+        self.metadataFileURL = cacheDirectory
+            .appendingPathComponent("usage_analytics_cache_manifest.json")
+        if restoreImmediately {
+            restoreIfNeeded()
+        }
+    }
+
+    public var isRestored: Bool {
+        lock.withLock { restored }
+    }
+
+    public func restoreIfNeeded() {
+        lock.lock()
+        guard !restored else {
+            lock.unlock()
+            return
+        }
+        restored = true
+        lock.unlock()
+
+        guard fileManager.fileExists(atPath: fileURL.path),
+              let data = try? Data(contentsOf: fileURL),
+              let payload = try? decoder.decode(CachePayload.self, from: data),
+              payload.schemaVersion == Self.currentSchemaVersion else {
+            return
+        }
+
+        var restoredEntries = payload.entries
+        var restoredMetadata: [ValidationMetadata]?
+        var restoredMetadataData: Data?
+        if let metadataData = try? Data(contentsOf: metadataFileURL),
+           let metadataPayload = try? decoder.decode(MetadataPayload.self, from: metadataData),
+           metadataPayload.schemaVersion == Self.currentSchemaVersion {
+            let metadataByFilter = Dictionary(
+                uniqueKeysWithValues: metadataPayload.entries.map { ($0.filter, $0) }
+            )
+            restoredEntries = restoredEntries.map { entry in
+                guard let metadata = metadataByFilter[entry.filter] else { return entry }
+                var updatedEntry = entry
+                updatedEntry.sourceFingerprint = metadata.sourceFingerprint
+                updatedEntry.refreshedAt = metadata.refreshedAt
+                updatedEntry.lastFingerprintCheckedAt = metadata.lastFingerprintCheckedAt
+                return updatedEntry
+            }
+            restoredMetadata = metadataPayload.entries
+            restoredMetadataData = metadataData
+        }
+
+        lock.lock()
+        entries = Dictionary(uniqueKeysWithValues: restoredEntries.map { ($0.filter, $0) })
+        pruneLocked()
+        let persistedEntries = sortedEntriesLocked()
+        lastPersistedEntries = persistedEntries
+        lastPersistedCacheData = data
+        lastPersistedMetadata = restoredMetadata
+        lastPersistedMetadataData = restoredMetadataData
+        lock.unlock()
+    }
+
+    public func reset() {
+        lock.withLock {
+            entries.removeAll()
+            restored = true
+            lastPersistedEntries = nil
+            lastPersistedCacheData = nil
+            lastPersistedMetadata = nil
+            lastPersistedMetadataData = nil
+        }
+        persistenceQueue.sync {
+            try? fileManager.removeItem(at: fileURL)
+            try? fileManager.removeItem(at: metadataFileURL)
+        }
     }
 
     public func entry(for filter: UsageAnalyticsFilter) -> UsageAnalyticsCacheEntry? {
@@ -132,18 +225,14 @@ public final class UsageAnalyticsSnapshotCacheStore: @unchecked Sendable {
         snapshot: UsageAnalyticsSnapshot,
         sourceFingerprint: UsageAnalyticsSourceFingerprint?
     ) {
-        let now = nowProvider()
-        lock.lock()
-        entries[snapshot.filter] = UsageAnalyticsCacheEntry(
-            filter: snapshot.filter,
+        let persistedEntries = updateEntry(
             snapshot: snapshot,
-            sourceFingerprint: sourceFingerprint,
-            refreshedAt: now,
-            lastFingerprintCheckedAt: sourceFingerprint == nil ? nil : now
+            sourceFingerprint: sourceFingerprint
         )
-        pruneLocked()
-        persistLocked()
-        lock.unlock()
+        persistenceQueue.sync {
+            persistSnapshot(persistedEntries)
+            persistMetadata(metadataEntries(from: persistedEntries))
+        }
     }
 
     public func markValidated(
@@ -151,15 +240,45 @@ public final class UsageAnalyticsSnapshotCacheStore: @unchecked Sendable {
         sourceFingerprint: UsageAnalyticsSourceFingerprint,
         at validatedAt: Date
     ) {
-        lock.lock()
-        if var entry = entries[filter] {
-            entry.sourceFingerprint = sourceFingerprint
-            entry.refreshedAt = validatedAt
-            entry.lastFingerprintCheckedAt = validatedAt
-            entries[filter] = entry
-            persistLocked()
+        guard let persistedEntries = updateValidation(
+            filter: filter,
+            sourceFingerprint: sourceFingerprint,
+            at: validatedAt
+        ) else { return }
+        persistenceQueue.sync {
+            persistMetadata(metadataEntries(from: persistedEntries))
         }
-        lock.unlock()
+    }
+
+    public func saveInBackground(
+        snapshot: UsageAnalyticsSnapshot,
+        sourceFingerprint: UsageAnalyticsSourceFingerprint?
+    ) {
+        let persistedEntries = updateEntry(
+            snapshot: snapshot,
+            sourceFingerprint: sourceFingerprint
+        )
+        persistenceQueue.async { [weak self] in
+            guard let self else { return }
+            self.persistSnapshot(persistedEntries)
+            self.persistMetadata(self.metadataEntries(from: persistedEntries))
+        }
+    }
+
+    public func markValidatedInBackground(
+        filter: UsageAnalyticsFilter,
+        sourceFingerprint: UsageAnalyticsSourceFingerprint,
+        at validatedAt: Date
+    ) {
+        guard let persistedEntries = updateValidation(
+            filter: filter,
+            sourceFingerprint: sourceFingerprint,
+            at: validatedAt
+        ) else { return }
+        persistenceQueue.async { [weak self] in
+            guard let self else { return }
+            self.persistMetadata(self.metadataEntries(from: persistedEntries))
+        }
     }
 
     public func shouldProbeFingerprint(
@@ -194,49 +313,125 @@ public final class UsageAnalyticsSnapshotCacheStore: @unchecked Sendable {
         )
     }
 
-    private func restoreFromDisk() {
-        guard fileManager.fileExists(atPath: fileURL.path),
-              let data = try? Data(contentsOf: fileURL),
-              let payload = try? decoder.decode(CachePayload.self, from: data),
-              payload.schemaVersion == Self.currentSchemaVersion else {
-            return
-        }
+    private func updateEntry(
+        snapshot: UsageAnalyticsSnapshot,
+        sourceFingerprint: UsageAnalyticsSourceFingerprint?
+    ) -> [UsageAnalyticsCacheEntry] {
+        let now = nowProvider()
         lock.lock()
-        entries = Dictionary(uniqueKeysWithValues: payload.entries.map { ($0.filter, $0) })
+        entries[snapshot.filter] = UsageAnalyticsCacheEntry(
+            filter: snapshot.filter,
+            snapshot: snapshot,
+            sourceFingerprint: sourceFingerprint,
+            refreshedAt: now,
+            lastFingerprintCheckedAt: sourceFingerprint == nil ? nil : now
+        )
         pruneLocked()
         let persistedEntries = sortedEntriesLocked()
-        lastPersistedEntries = persistedEntries
-        lastPersistedCacheData = try? encoder.encode(CachePayload(
-            schemaVersion: Self.currentSchemaVersion,
-            entries: persistedEntries
-        ))
         lock.unlock()
+        return persistedEntries
     }
 
-    private func persistLocked() {
+    private func updateValidation(
+        filter: UsageAnalyticsFilter,
+        sourceFingerprint: UsageAnalyticsSourceFingerprint,
+        at validatedAt: Date
+    ) -> [UsageAnalyticsCacheEntry]? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard var entry = entries[filter] else { return nil }
+        entry.sourceFingerprint = sourceFingerprint
+        entry.refreshedAt = validatedAt
+        entry.lastFingerprintCheckedAt = validatedAt
+        entries[filter] = entry
+        return sortedEntriesLocked()
+    }
+
+    private func persistSnapshot(_ persistedEntries: [UsageAnalyticsCacheEntry]) {
         do {
-            let persistedEntries = sortedEntriesLocked()
-            if persistedEntries == lastPersistedEntries,
-               fileManager.fileExists(atPath: fileURL.path) {
-                return
-            }
+            lock.lock()
+            let unchanged = persistedEntries == lastPersistedEntries
+                && fileManager.fileExists(atPath: fileURL.path)
+            lock.unlock()
+            if unchanged { return }
+
             let payload = CachePayload(
                 schemaVersion: Self.currentSchemaVersion,
                 entries: persistedEntries
             )
             let data = try encoder.encode(payload)
-            if data == lastPersistedCacheData,
-               fileManager.fileExists(atPath: fileURL.path) {
-                lastPersistedEntries = persistedEntries
+
+            lock.lock()
+            let sameData = data == lastPersistedCacheData
+                && fileManager.fileExists(atPath: fileURL.path)
+            lock.unlock()
+            if sameData {
+                lock.withLock {
+                    lastPersistedEntries = persistedEntries
+                }
                 return
             }
+
             try fileManager.createDirectory(
                 at: fileURL.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
             try data.write(to: fileURL, options: .atomic)
-            lastPersistedEntries = persistedEntries
-            lastPersistedCacheData = data
+            lock.withLock {
+                lastPersistedEntries = persistedEntries
+                lastPersistedCacheData = data
+            }
+        } catch {
+            return
+        }
+    }
+
+    private func metadataEntries(
+        from persistedEntries: [UsageAnalyticsCacheEntry]
+    ) -> [ValidationMetadata] {
+        persistedEntries.map { entry in
+            ValidationMetadata(
+                filter: entry.filter,
+                sourceFingerprint: entry.sourceFingerprint,
+                refreshedAt: entry.refreshedAt,
+                lastFingerprintCheckedAt: entry.lastFingerprintCheckedAt
+            )
+        }
+    }
+
+    private func persistMetadata(_ persistedMetadata: [ValidationMetadata]) {
+        do {
+            let unchanged = lock.withLock {
+                persistedMetadata == lastPersistedMetadata
+                    && fileManager.fileExists(atPath: metadataFileURL.path)
+            }
+            if unchanged { return }
+
+            let payload = MetadataPayload(
+                schemaVersion: Self.currentSchemaVersion,
+                entries: persistedMetadata
+            )
+            let data = try encoder.encode(payload)
+            let sameData = lock.withLock {
+                data == lastPersistedMetadataData
+                    && fileManager.fileExists(atPath: metadataFileURL.path)
+            }
+            if sameData {
+                lock.withLock {
+                    lastPersistedMetadata = persistedMetadata
+                }
+                return
+            }
+
+            try fileManager.createDirectory(
+                at: metadataFileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try data.write(to: metadataFileURL, options: .atomic)
+            lock.withLock {
+                lastPersistedMetadata = persistedMetadata
+                lastPersistedMetadataData = data
+            }
         } catch {
             return
         }
@@ -264,9 +459,7 @@ public final class UsageAnalyticsSnapshotCacheStore: @unchecked Sendable {
         calendar: Calendar
     ) -> Bool {
         switch range {
-        case .last24Hours:
-            return calendar.isDate(generatedAt, equalTo: now, toGranularity: .hour)
-        case .last7Days, .last30Days:
+        case .today, .week, .month:
             return calendar.isDate(generatedAt, equalTo: now, toGranularity: .day)
         case .all:
             return calendar.isDate(generatedAt, equalTo: now, toGranularity: .month)

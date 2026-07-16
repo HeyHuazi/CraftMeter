@@ -122,7 +122,7 @@ final class ExtendedLocalUsageScannerTests: XCTestCase {
             selectedClientID: "craft-agent",
             selectedProviderID: "craft-provider",
             selectedProjectID: "craftmeter",
-            range: .last24Hours
+            range: .today
         )
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -184,7 +184,7 @@ final class ExtendedLocalUsageScannerTests: XCTestCase {
         let filter = UsageAnalyticsFilter(
             selectedClientID: "craft-agent",
             selectedFacetKind: .craftSource,
-            range: .last24Hours
+            range: .today
         )
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -209,7 +209,7 @@ final class ExtendedLocalUsageScannerTests: XCTestCase {
             filter: UsageAnalyticsFilter(
                 selectedFacetKind: .craftSource,
                 selectedFacetValue: "github",
-                range: .last24Hours
+                range: .today
             ),
             calendar: calendar,
             now: now,

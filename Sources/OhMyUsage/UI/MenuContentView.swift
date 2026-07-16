@@ -3,22 +3,28 @@ import AppKit
 import SwiftUI
 import OhMyUsageApplication
 
-private struct MenuCardsContentHeightPreferenceKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
+/**
+ * [INPUT]: 依赖 AppViewModel 的实时 UsageSnapshot 菜单状态、缓存 UsageAnalyticsSnapshot、显式历史周期刷新入口、共享菜单视口 Token 与设置窗口回调。
+ * [OUTPUT]: 对外提供默认展示用量、可切换额度的 324px 双视图菜单，包含稳定外框高度、历史周期选择即时刷新、当前视图刷新、权限引导和完整统计导航。
+ * [POS]: UI 的菜单面板编排根；以固定共享视口隔离实时配额卡与历史 Dashboard，历史周期选择通过 AppViewModel 显式刷新对应快照，内容变化只触发页内滚动。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 
 struct MenuContentView: View {
+    private enum Section: String, CaseIterable, Hashable {
+        case quota
+        case usage
+    }
+
     @Bindable var viewModel: AppViewModel
     var onOpenSettings: (() -> Void)?
     @State private var now = Date()
+    @State private var selectedSection: Section = .usage
+    @State private var usageMetric: MenuUsageMetricMode = .tokens
+    @State private var usageBreakdown: MenuUsageBreakdown = .model
     @State private var onboardingDiscoveryMessage: String?
     @State private var onboardingDiscoveryIsError = false
     @State private var onboardingDiscoveryInFlight = false
-    @State private var cardsContentHeight: CGFloat = 0
     @State private var clockTask: Task<Void, Never>?
     private let clockController = VisibleClockController()
 
@@ -40,8 +46,8 @@ struct MenuContentView: View {
     private let headerActionIconOpacity = SettingsVisualTokens.Menu.headerActionIconOpacity
     private let updateHintColor = SettingsVisualTokens.Status.positive
     private let updateErrorColor = SettingsVisualTokens.Status.error
-    // menubar 面板最高 800px，超出后只滚动卡片区。
-    private let panelMaxHeight = SettingsVisualTokens.Menu.panelMaxHeight
+    // 额度与用量共享固定内容视口；异步刷新只改变页内内容，不改变面板外框。
+    private let contentViewportHeight = SettingsVisualTokens.Menu.contentViewportHeight
     private let panelTopPadding = SettingsVisualTokens.Menu.panelTopPadding
     private let panelBottomPadding = SettingsVisualTokens.Menu.panelBottomPadding
     private let panelHorizontalPadding = SettingsVisualTokens.Menu.panelHorizontalPadding
@@ -51,10 +57,18 @@ struct MenuContentView: View {
     var body: some View {
         let state = viewModel.menuViewState(now: now)
 
-        // menubar 主面板布局：顶部 header + 下方卡片列表。
+        // menubar 主面板布局：顶部 header + 双视图分段 + 当前内容。
         VStack(alignment: .leading, spacing: panelContentSpacing) {
             header(state.header)
-            cards(state)
+            sectionControl
+            Group {
+                if selectedSection == .quota {
+                    cards(state)
+                } else {
+                    usageDashboard
+                }
+            }
+            .frame(height: contentViewportHeight)
         }
         .frame(width: SettingsVisualTokens.Menu.panelWidth)
         .padding(.top, panelTopPadding)
@@ -81,8 +95,82 @@ struct MenuContentView: View {
         .onDisappear {
             stopClock()
         }
-        .onChange(of: viewModel.menuPanelVisible) { _, _ in
+        .onChange(of: viewModel.menuPanelVisible) { _, visible in
+            if visible, selectedSection == .usage {
+                viewModel.refreshUsageAnalyticsIfNeeded(force: false)
+            } else if !visible {
+                selectedSection = .usage
+            }
             restartClockIfNeeded()
+        }
+    }
+
+    private var sectionControl: some View {
+        HStack(spacing: 2) {
+            ForEach(Section.allCases, id: \.self) { section in
+                Button {
+                    selectedSection = section
+                } label: {
+                    Text(sectionTitle(section))
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(selectedSection == section ? Color.black.opacity(0.88) : SettingsVisualTokens.Text.secondary)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 24)
+                        .background(
+                            Capsule().fill(selectedSection == section ? Color.white.opacity(0.82) : Color.clear)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(2)
+        .background(Capsule().fill(Color.white.opacity(0.10)))
+    }
+
+    private var usageDashboard: some View {
+        let snapshot = viewModel.usageAnalyticsSnapshot
+        let presentation = MenuUsageDashboardPresenter.build(
+            snapshot: snapshot,
+            language: viewModel.language,
+            metric: usageMetric,
+            breakdown: usageBreakdown
+        )
+        return MenuUsageDashboardView(
+            presentation: presentation,
+            language: viewModel.language,
+            range: viewModel.usageAnalyticsFilter.range,
+            metric: usageMetric,
+            breakdown: usageBreakdown,
+            isLoading: viewModel.usageAnalyticsLoading,
+            onSelectRange: { range in
+                selectUsageRange(range)
+            },
+            onSelectMetric: { usageMetric = $0 },
+            onSelectBreakdown: { usageBreakdown = $0 },
+            onOpenFullAnalytics: {
+                if let onOpenSettings {
+                    onOpenSettings()
+                } else {
+                    SettingsWindowController.shared.show(viewModel: viewModel)
+                }
+            }
+        )
+    }
+
+    private func selectUsageRange(_ range: UsageAnalyticsRange) {
+        var filter = viewModel.usageAnalyticsFilter
+        guard filter.range != range else { return }
+        filter.range = range
+        viewModel.usageAnalyticsFilter = filter
+        viewModel.refreshUsageAnalyticsIfNeeded(force: false)
+    }
+
+    private func sectionTitle(_ section: Section) -> String {
+        switch section {
+        case .quota:
+            return viewModel.language == .zhHans ? "额度" : "Quota"
+        case .usage:
+            return viewModel.language == .zhHans ? "用量" : "Usage"
         }
     }
 
@@ -103,7 +191,11 @@ struct MenuContentView: View {
 
             HStack(spacing: headerActionSpacing) {
                 headerIconButton(iconName: "refresh_icon", fallback: "arrow.clockwise") {
-                    viewModel.refreshNow()
+                    if selectedSection == .usage {
+                        viewModel.refreshUsageAnalytics()
+                    } else {
+                        viewModel.refreshNow()
+                    }
                 }
                 headerIconButton(iconName: "settings_icon", fallback: "gearshape") {
                     if let onOpenSettings {
@@ -123,7 +215,7 @@ struct MenuContentView: View {
     }
 
     private func cards(_ state: MenuViewState) -> some View {
-        // 卡片流容器：内容不足按实际高度；超过上限时在区内滚动。
+        // 额度内容始终在共享视口内滚动，Provider 数量和异步刷新不再驱动外框高度。
         ScrollView {
             VStack(spacing: cardSpacing) {
                 if state.shouldShowPermissionGuide {
@@ -134,34 +226,15 @@ struct MenuContentView: View {
                     menuCard(card)
                 }
             }
-            .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(key: MenuCardsContentHeightPreferenceKey.self, value: proxy.size.height)
-                }
-            )
         }
         .scrollIndicators(.never)
-        .frame(height: cardsViewportHeight)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(
             SettingsSmoothedRoundedRectangle(
                 cornerRadius: cardsViewportCornerRadius,
                 smoothing: SettingsVisualTokens.Smoothing.continuous
             )
         )
-        .onPreferenceChange(MenuCardsContentHeightPreferenceKey.self) { height in
-            if abs(cardsContentHeight - height) > 0.5 {
-                cardsContentHeight = height
-            }
-        }
-    }
-
-    private var cardsViewportHeight: CGFloat {
-        let maxHeight = max(
-            0,
-            panelMaxHeight - panelTopPadding - panelBottomPadding - headerHeight - panelContentSpacing
-        )
-        let measured = cardsContentHeight > 0 ? cardsContentHeight : maxHeight
-        return min(maxHeight, measured)
     }
 
     private func headerIconButton(iconName: String, fallback: String, action: @escaping () -> Void) -> some View {

@@ -105,8 +105,8 @@ final class ModelPricingTests: XCTestCase {
         XCTAssertEqual(enriched.pricingState, .reported)
     }
 
-    func testCatalogMatchesOfficialProviderButRejectsRelayAndOpenRouter() throws {
-        let catalog = ModelPricingCatalog(bundledData: fixtureCatalogData())
+    func testCatalogMatchesOfficialProviderAndFallsBackToUniqueExactModel() throws {
+        let catalog = isolatedCatalog(bundledData: fixtureCatalogData())
         let official = record(
             source: .ohMyUsageLocal,
             appType: "codex",
@@ -114,6 +114,89 @@ final class ModelPricingTests: XCTestCase {
             providerName: "Codex",
             modelID: "gpt-5"
         )
+        let craftAgent = record(
+            source: .ohMyUsageLocal,
+            appType: "craft-agent",
+            providerID: "craftmeter-craft-agent-local",
+            providerName: "Craft Agents",
+            modelID: "gpt-5"
+        )
+
+        XCTAssertEqual(catalog.quote(for: official)?.providerID, "openai")
+        XCTAssertEqual(catalog.quote(for: craftAgent)?.providerID, "openai")
+    }
+
+    func testCatalogProviderExactMatchWinsBeforeCrossCatalogFallback() throws {
+        let catalog = isolatedCatalog(bundledData: fixtureCatalogData(providers: [
+            fixtureProvider(id: "openai", modelID: "shared-model", input: 1, output: 10),
+            fixtureProvider(id: "anthropic", modelID: "shared-model", input: 3, output: 15)
+        ]))
+        let quote = try XCTUnwrap(catalog.quote(for: record(
+            source: .ohMyUsageLocal,
+            appType: "codex",
+            providerID: "codex-local",
+            providerName: "Codex",
+            modelID: "shared-model"
+        )))
+
+        XCTAssertEqual(quote.providerID, "openai")
+        XCTAssertEqual(quote.inputUSDPerMillion, 1)
+    }
+
+    func testCatalogAllowsCrossCatalogExactModelWhenRatesAgree() throws {
+        let catalog = isolatedCatalog(bundledData: fixtureCatalogData(providers: [
+            fixtureProvider(id: "openai", modelID: "shared-model", input: 2, output: 12),
+            fixtureProvider(id: "anthropic", modelID: "shared-model", input: 2, output: 12)
+        ]))
+        let quote = catalog.quote(for: record(
+            source: .ohMyUsageLocal,
+            appType: "craft-agent",
+            providerID: "craftmeter-craft-agent-local",
+            providerName: "Craft Agents",
+            modelID: "shared-model"
+        ))
+
+        XCTAssertEqual(quote?.inputUSDPerMillion, 2)
+    }
+
+    func testCatalogRejectsConflictingOrInexactCrossCatalogModels() throws {
+        let catalog = isolatedCatalog(bundledData: fixtureCatalogData(providers: [
+            fixtureProvider(id: "openai", modelID: "shared-model", input: 1, output: 10),
+            fixtureProvider(id: "anthropic", modelID: "shared-model", input: 2, output: 10),
+            fixtureProvider(id: "google", modelID: "gpt-5", input: 3, output: 20)
+        ]))
+        let unknownProvider = (
+            source: UsageAnalyticsRecordSource.ohMyUsageLocal,
+            appType: "craft-agent",
+            providerID: "craftmeter-craft-agent-local",
+            providerName: "Craft Agents"
+        )
+
+        XCTAssertNil(catalog.quote(for: record(
+            source: unknownProvider.source,
+            appType: unknownProvider.appType,
+            providerID: unknownProvider.providerID,
+            providerName: unknownProvider.providerName,
+            modelID: "shared-model"
+        )))
+        XCTAssertNil(catalog.quote(for: record(
+            source: unknownProvider.source,
+            appType: unknownProvider.appType,
+            providerID: unknownProvider.providerID,
+            providerName: unknownProvider.providerName,
+            modelID: "gpt-5-custom"
+        )))
+        XCTAssertNil(catalog.quote(for: record(
+            source: unknownProvider.source,
+            appType: unknownProvider.appType,
+            providerID: unknownProvider.providerID,
+            providerName: unknownProvider.providerName,
+            modelID: "missing-model"
+        )))
+    }
+
+    func testCatalogRejectsRelayAndOpenRouterEvenWhenModelIsUnique() throws {
+        let catalog = isolatedCatalog(bundledData: fixtureCatalogData())
         let relay = record(
             source: .ccswitchProxy,
             appType: "codex",
@@ -122,7 +205,6 @@ final class ModelPricingTests: XCTestCase {
             modelID: "gpt-5"
         )
 
-        XCTAssertEqual(catalog.quote(for: official)?.providerID, "openai")
         XCTAssertNil(catalog.quote(for: relay))
     }
 
@@ -187,22 +269,43 @@ final class ModelPricingTests: XCTestCase {
         ))?.inputUSDPerMillion, 2)
     }
 
+    private func isolatedCatalog(bundledData: Data) -> ModelPricingCatalog {
+        ModelPricingCatalog(
+            baseDirectoryURL: URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+                .appendingPathComponent("model-pricing-fixture-\(UUID().uuidString)", isDirectory: true),
+            bundledData: bundledData
+        )
+    }
+
     private func fixtureCatalogData(fetchedAt: String = "2026-07-11T17:43:00Z") -> Data {
+        fixtureCatalogData(
+            fetchedAt: fetchedAt,
+            providers: [fixtureProvider(id: "openai", modelID: "gpt-5", input: 1.25, output: 10, cacheRead: 0.125)]
+        )
+    }
+
+    private func fixtureCatalogData(fetchedAt: String = "2026-07-11T17:43:00Z", providers: [String]) -> Data {
         """
         {
           "schemaVersion": 1,
           "fetchedAt": "\(fetchedAt)",
           "sourceURL": "https://models.dev/api.json",
-          "providers": [
-            {
-              "id": "openai",
-              "models": [
-                {"id":"gpt-5","cost":{"input":1.25,"output":10,"cache_read":0.125}}
-              ]
-            }
-          ]
+          "providers": [\(providers.joined(separator: ","))]
         }
         """.data(using: .utf8)!
+    }
+
+    private func fixtureProvider(
+        id: String,
+        modelID: String,
+        input: Decimal,
+        output: Decimal,
+        cacheRead: Decimal? = nil
+    ) -> String {
+        let cacheReadJSON = cacheRead.map { ",\"cache_read\":\($0)" } ?? ""
+        return """
+        {"id":"\(id)","models":[{"id":"\(modelID)","cost":{"input":\(input),"output":\(output)\(cacheReadJSON)}}]}
+        """
     }
 
     private func record(

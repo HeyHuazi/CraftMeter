@@ -11,7 +11,7 @@ final class UsageAnalyticsRefreshCoordinatorTests: XCTestCase {
 
         let savedAt = try fixedDate("2026-05-16T12:00:00Z")
         let refreshedAt = savedAt.addingTimeInterval(30)
-        let filter = UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .last7Days)
+        let filter = UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .week)
         let cachedSnapshot = UsageAnalyticsSnapshot.empty(filter: filter, generatedAt: savedAt)
         let initialFingerprint = usageAnalyticsFingerprint(ccSwitchSeed: 1, localSeed: 1, at: savedAt)
         var fingerprintWithChangedCCSwitch = initialFingerprint
@@ -33,7 +33,7 @@ final class UsageAnalyticsRefreshCoordinatorTests: XCTestCase {
                 fingerprintCallCount.increment()
                 return changedFingerprint
             },
-            snapshotLoader: { filter, _ in
+            snapshotLoader: { filter, _, _ in
                 UsageAnalyticsSnapshot.empty(filter: filter, generatedAt: refreshedAt)
             }
         )
@@ -71,7 +71,7 @@ final class UsageAnalyticsRefreshCoordinatorTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
 
         let now = try fixedDate("2026-05-16T12:00:00Z")
-        let filter = UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .last7Days)
+        let filter = UsageAnalyticsFilter(mode: .all, selectedModelID: nil, range: .week)
         let cachedSnapshot = UsageAnalyticsSnapshot.empty(filter: filter, generatedAt: now)
         let fingerprint = UsageAnalyticsSourceFingerprint(
             ccSwitch: UsageAnalyticsFileFingerprint(roots: ["/tmp/cc-switch.db"], fileCount: 1, totalSize: 128, latestModificationTime: now),
@@ -86,7 +86,7 @@ final class UsageAnalyticsRefreshCoordinatorTests: XCTestCase {
             cacheStore: cacheStore,
             nowProvider: { now },
             sourceFingerprintLoader: { _ in fingerprint },
-            snapshotLoader: { filter, _ in
+            snapshotLoader: { filter, _, _ in
                 snapshotCallCount.increment()
                 return UsageAnalyticsSnapshot.empty(filter: filter, generatedAt: now)
             }

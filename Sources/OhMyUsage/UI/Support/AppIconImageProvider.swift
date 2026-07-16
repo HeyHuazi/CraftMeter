@@ -1,9 +1,19 @@
 import AppKit
 
+/**
+ * [INPUT]: 依赖 AppKit 与应用 bundle 中的 AppIcon/app_icon_source 资源。
+ * [OUTPUT]: 对外提供按尺寸复制的非模板应用图标，并可应用到 NSApplication。
+ * [POS]: UI Support 的图标解码边界；原始 bundle 图像只加载一次，调用方始终获得独立副本。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 @MainActor
 enum AppIconImageProvider {
+    private static var cachedSourceImage: NSImage?
+
     static func image(size: CGFloat? = nil) -> NSImage? {
-        guard let image = bundledImage() ?? applicationIconImage() else {
+        guard let source = sourceImage(),
+              let image = source.copy() as? NSImage else {
             return nil
         }
         if let size {
@@ -16,6 +26,15 @@ enum AppIconImageProvider {
     static func applyApplicationIcon(size: CGFloat = 256) {
         guard let image = image(size: size) else { return }
         NSApp.applicationIconImage = image
+    }
+
+    private static func sourceImage() -> NSImage? {
+        if let cachedSourceImage {
+            return cachedSourceImage
+        }
+        let image = bundledImage() ?? applicationIconImage()
+        cachedSourceImage = image
+        return image
     }
 
     private static func bundledImage() -> NSImage? {
