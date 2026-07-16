@@ -1,3 +1,9 @@
+/**
+ * [INPUT]: 依赖 OhMyUsage 的 CodexDesktopAppService 可注入进程/启动 seams，依赖 XCTest/AppKit 模拟 NSRunningApplication 生命周期。
+ * [OUTPUT]: 对外提供 Codex 桌面应用重启路径的单元测试，覆盖 graceful shutdown、force quit fallback、启动重试与未运行分支。
+ * [POS]: Tests/OhMyUsageTests 的桌面应用生命周期边界测试，确保 Codex 账号切换不会把 CI 稳定性建立在真实 App 或毫秒级调度上。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
 import AppKit
 import XCTest
 @testable import OhMyUsage
@@ -58,10 +64,7 @@ final class CodexDesktopAppServiceTests: XCTestCase {
             },
             forceTerminator: { _ in
                 forceCalls += 1
-                Task {
-                    try? await Task.sleep(nanoseconds: 20_000_000)
-                    state.setRunning(false)
-                }
+                state.setRunning(false)
                 return true
             },
             openApplication: { _, _ in NSRunningApplication.current }
