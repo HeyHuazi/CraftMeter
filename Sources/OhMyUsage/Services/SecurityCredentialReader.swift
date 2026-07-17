@@ -1,15 +1,27 @@
 import Foundation
-import LocalAuthentication
 import Security
 
 /**
- * [INPUT]: 依赖 Security/LocalAuthentication 的 generic password API，依赖 ShellCommand 作为生产环境 Keychain 写入兜底。
- * [OUTPUT]: 对外提供桌面应用 OAuth/浏览器凭据导入所需的通用密码读取与保存能力。
- * [POS]: Services 的低层系统凭据边界；生产环境可触达 macOS Keychain，XCTest 默认短路以保护开发机钥匙串。
+ * [INPUT]: 依赖统一 KeychainAccessPolicy 与 Security generic password API，并允许测试注入隔离的写入状态适配器。
+ * [OUTPUT]: 对外提供显式导入/账户切换使用的硬失败非交互读取，以及失败不删除旧项的 update-or-add 保存能力。
+ * [POS]: Services 的外部系统凭据边界；后台 Provider 不应调用本类型，XCTest 默认短路，任何失败都不会升级为 shell、认证 UI 或破坏性写入。
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
 enum SecurityCredentialReader {
+    struct SecureStoreWriter: @unchecked Sendable {
+        var update: (_ query: CFDictionary, _ attributes: CFDictionary) -> OSStatus
+        var add: (_ attributes: CFDictionary) -> OSStatus
+
+        static let live = SecureStoreWriter(
+            update: { query, attributes in
+                SecItemUpdate(query, attributes)
+            },
+            add: { attributes in
+                SecItemAdd(attributes, nil)
+            }
+        )
+    }
     private struct CredentialCacheKey: Hashable {
         let service: String
         let account: String?
@@ -55,8 +67,11 @@ enum SecurityCredentialReader {
             kSecAttrService as String: normalizedService,
             kSecMatchLimit as String: kSecMatchLimitOne,
             kSecReturnData as String: true,
-            kSecUseAuthenticationContext as String: nonInteractiveContext(),
         ]
+        query.merge(
+            KeychainAccessPolicy.authenticationAttributes(interactive: false),
+            uniquingKeysWith: { _, rhs in rhs }
+        )
         if let normalizedAccount {
             query[kSecAttrAccount as String] = normalizedAccount
         } else if let account {
@@ -72,55 +87,70 @@ enum SecurityCredentialReader {
             cache(.value(text), for: cacheKey, now: now)
             return text
         }
+        KeychainAccessPolicy.logFailure(
+            operation: "read",
+            kind: KeychainAccessPolicy.credentialKind(service: normalizedService),
+            interactive: false,
+            status: status
+        )
         cache(.missing, for: cacheKey, now: now)
         return nil
     }
 
     @discardableResult
-    static func saveGenericPassword(service: String, account: String? = nil, text: String) -> Bool {
+    static func saveGenericPassword(
+        service: String,
+        account: String? = nil,
+        text: String,
+        secureStore: SecureStoreWriter = .live,
+        allowUnderXCTest: Bool = false
+    ) -> Bool {
         let normalizedService = normalize(service)
         let normalizedAccount = normalizeOptional(account) ?? normalizedService
-        guard !isRunningInXCTest else {
+        guard allowUnderXCTest || !isRunningInXCTest else {
             return false
         }
-        let deleteQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: normalizedService,
-        ]
-        SecItemDelete(deleteQuery as CFDictionary)
 
-        let data = Data(text.utf8)
-        let addAttributes: [String: Any] = [
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: normalizedService,
             kSecAttrAccount as String: normalizedAccount,
+        ]
+        query.merge(
+            KeychainAccessPolicy.authenticationAttributes(interactive: false),
+            uniquingKeysWith: { _, rhs in rhs }
+        )
+        let data = Data(text.utf8)
+        let updateAttributes: [String: Any] = [
             kSecValueData as String: data,
         ]
-        let status = SecItemAdd(addAttributes as CFDictionary, nil)
-        if status == errSecSuccess {
-            let now = Date()
-            cache(.value(text), for: CredentialCacheKey(service: normalizedService, account: normalizedAccount), now: now)
-            cache(.value(text), for: CredentialCacheKey(service: normalizedService, account: nil), now: now)
-            return true
-        }
 
-        let args = [
-            "add-generic-password",
-            "-U",
-            "-s", normalizedService,
-            "-a", normalizedAccount,
-            "-w", text
-        ]
-        guard let output = ShellCommand.run(executable: "/usr/bin/security", arguments: args, timeout: 5) else {
+        let didSave = KeychainGenericPasswordWriter.updateOrAdd(
+            update: {
+                secureStore.update(query as CFDictionary, updateAttributes as CFDictionary)
+            },
+            add: {
+                var addAttributes: [String: Any] = [
+                    kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrService as String: normalizedService,
+                    kSecAttrAccount as String: normalizedAccount,
+                    kSecValueData as String: data,
+                ]
+                addAttributes.merge(
+                    KeychainAccessPolicy.authenticationAttributes(interactive: false),
+                    uniquingKeysWith: { _, rhs in rhs }
+                )
+                return secureStore.add(addAttributes as CFDictionary)
+            }
+        )
+        guard didSave else {
             return false
         }
-        if output.status == 0 {
-            let now = Date()
-            cache(.value(text), for: CredentialCacheKey(service: normalizedService, account: normalizedAccount), now: now)
-            cache(.value(text), for: CredentialCacheKey(service: normalizedService, account: nil), now: now)
-            return true
-        }
-        return false
+
+        let now = Date()
+        cache(.value(text), for: CredentialCacheKey(service: normalizedService, account: normalizedAccount), now: now)
+        cache(.value(text), for: CredentialCacheKey(service: normalizedService, account: nil), now: now)
+        return true
     }
 
     private static func cachedCredential(for key: CredentialCacheKey, now: Date) -> CachedCredentialValue? {
@@ -175,9 +205,7 @@ enum SecurityCredentialReader {
             Bundle.main.bundlePath.lowercased().contains(".xctest")
     }
 
-    private static func nonInteractiveContext() -> LAContext {
-        let context = LAContext()
-        context.interactionNotAllowed = true
-        return context
+    static func nonInteractiveAuthenticationAttributesForTesting() -> [String: Any] {
+        KeychainAccessPolicy.authenticationAttributes(interactive: false)
     }
 }

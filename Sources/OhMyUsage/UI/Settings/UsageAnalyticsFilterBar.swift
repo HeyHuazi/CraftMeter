@@ -2,8 +2,8 @@ import SwiftUI
 
 /**
  * [INPUT]: Receives analytics dimension options and a binding to UsageAnalyticsFilter.
- * [OUTPUT]: Renders compact composable selectors plus a single clear-filter action.
- * [POS]: Usage analytics presentation component; owns no scanning, aggregation, or cache policy.
+ * [OUTPUT]: Renders compact composable selectors, localized Craft facet labels, and a single clear-filter action.
+ * [POS]: Usage analytics presentation component; owns no scanning, aggregation, stable facet identifiers, or cache policy.
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
@@ -19,7 +19,7 @@ struct UsageAnalyticsFilterBar: View {
             modelSelector
             facetKindSelector
             if filter.selectedFacetKind != nil {
-                selector("活动值", selection: $filter.selectedFacetValue, options: snapshot.availableFacetValues)
+                selector("活动项", selection: $filter.selectedFacetValue, options: snapshot.availableFacetValues)
             }
             if hasSelection {
                 Button("清除筛选") {
@@ -50,14 +50,14 @@ struct UsageAnalyticsFilterBar: View {
     }
 
     private var facetKindSelector: some View {
-        Picker("Craft 活动", selection: Binding(
+        Picker("活动类型", selection: Binding(
             get: { filter.selectedFacetKind },
             set: { value in
                 filter.selectedFacetKind = value
                 filter.selectedFacetValue = nil
             }
         )) {
-            Text("全部活动").tag(UsageAnalyticsFacetKind?.none)
+            Text("全部类型").tag(UsageAnalyticsFacetKind?.none)
             ForEach(UsageAnalyticsFacetKind.allCases, id: \.self) { kind in
                 Text(kind.title).tag(Optional(kind))
             }
@@ -97,12 +97,12 @@ struct UsageAnalyticsFilterBar: View {
 extension UsageAnalyticsFacetKind {
     var title: String {
         switch self {
-        case .mcpServer: return "MCP"
-        case .skill: return "Skill"
-        case .craftSource: return "Source"
-        case .craftTool: return "Tool"
-        case .craftCategory: return "Category"
-        case .craftStatus: return "Status"
+        case .mcpServer: return "MCP 服务"
+        case .skill: return "技能"
+        case .craftSource: return "数据源"
+        case .craftTool: return "工具"
+        case .craftCategory: return "分类"
+        case .craftStatus: return "状态"
         case .permissionMode: return "权限模式"
         case .thinkingLevel: return "思考等级"
         }

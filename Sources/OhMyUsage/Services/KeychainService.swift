@@ -1,17 +1,28 @@
 import Foundation
-import LocalAuthentication
 import OhMyUsageDomain
 import OhMyUsageInfrastructure
 import Security
 
 /**
- * [INPUT]: Reads and writes provider credentials through the macOS Keychain or isolated test storage.
- * [OUTPUT]: Exposes CraftMeter's credential vault, idempotent secure-store preparation, and one-way migration from historical OhMyUsage services.
- * [POS]: OhMyUsage Services security boundary; secrets never enter analytics or application logs.
+ * [INPUT]: Reads and writes provider credentials through the unified KeychainAccessPolicy or isolated test storage.
+ * [OUTPUT]: Exposes CraftMeter's process-gated credential vault; background reads/writes are memory-only until an explicit user unlock, with unchanged-value suppression and one-way historical migration.
+ * [POS]: OhMyUsage Services security boundary; unstable Xcode/ad-hoc identities cannot turn startup refresh into Security.framework access, and failed mutations preserve prior state.
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 
 final class KeychainService: @unchecked Sendable {
+    enum SecureMutationIntent {
+        case interactiveUserMutation
+        case backgroundPersistence
+    }
+
+    private enum SecureVaultState {
+        case locked
+        case loading
+        case available
+        case unavailable
+    }
+
     struct SecureStoreAdapter {
         var readData: @Sendable (_ service: String, _ account: String, _ interactive: Bool) -> Data?
         var readAll: @Sendable (_ service: String, _ interactive: Bool) -> [String: String]?
@@ -52,6 +63,8 @@ final class KeychainService: @unchecked Sendable {
     private static let credentialLengthDefaultsKey = "CraftMeter.Keychain.CredentialLengths"
 
     private let lock = NSLock()
+    private let mutationLock = NSRecursiveLock()
+    private let vaultStateCondition = NSCondition()
     private let fileManager: FileManager
     private let storageURL: URL?
     private let useFileStorage: Bool
@@ -60,7 +73,7 @@ final class KeychainService: @unchecked Sendable {
     private var tokenCache: [String: String] = [:]
     private var missingCache: Set<String> = []
     private var credentialLengthCache: [String: Int]?
-    private var secureVaultLoaded = false
+    private var secureVaultState: SecureVaultState = .locked
 
     init(
         fileManager: FileManager = .default,
@@ -146,12 +159,7 @@ final class KeychainService: @unchecked Sendable {
         if useFileStorage {
             token = readFromDisk(service: normalizedService, account: account)
         } else {
-            token = readFromVault(service: normalizedService, account: account)
-                ?? readCurrentServiceAndMigrateIfPossible(service: normalizedService, account: account)
-                ?? readLegacyServiceAndMigrateIfPossible(account: account)
-            if token != nil {
-                markSecureStorePrepared()
-            }
+            token = cachedSecureTokenIfAvailable(key: key)
         }
 
         lock.lock()
@@ -169,14 +177,35 @@ final class KeychainService: @unchecked Sendable {
     }
 
     @discardableResult
-    func saveToken(_ token: String, service: String, account: String) -> Bool {
+    func saveToken(
+        _ token: String,
+        service: String,
+        account: String,
+        intent: SecureMutationIntent = .interactiveUserMutation
+    ) -> Bool {
+        mutationLock.lock()
+        defer { mutationLock.unlock() }
+
         let normalizedService = normalizedServiceName(service)
         let key = cacheKey(service: normalizedService, account: account)
 
+        if !useFileStorage {
+            switch intent {
+            case .interactiveUserMutation:
+                guard prepareSecureStoreAccess() else { return false }
+            case .backgroundPersistence:
+                guard isVaultAvailableInCurrentProcess else { return false }
+            }
+        }
+
         lock.lock()
-        tokenCache[key] = token
-        missingCache.remove(key)
-        let snapshot = tokenCache
+        if tokenCache[key] == token {
+            missingCache.remove(key)
+            lock.unlock()
+            return true
+        }
+        var snapshot = tokenCache
+        snapshot[key] = token
         lock.unlock()
 
         let ok: Bool
@@ -185,38 +214,57 @@ final class KeychainService: @unchecked Sendable {
         } else {
             ok = persistSecureSnapshot(snapshot, interactive: false)
         }
-        if ok {
-            if !useFileStorage {
-                recordCredentialLengths([key: token.count])
-                markSecureStorePrepared()
-            }
+        guard ok else {
+            return false
         }
-        return ok
+
+        lock.lock()
+        tokenCache[key] = token
+        missingCache.remove(key)
+        lock.unlock()
+
+        if !useFileStorage {
+            recordCredentialLengths([key: token.count])
+            markSecureStorePrepared()
+        }
+        return true
     }
 
     @discardableResult
     func deleteToken(service: String, account: String) -> Bool {
+        mutationLock.lock()
+        defer { mutationLock.unlock() }
+
         let normalizedService = normalizedServiceName(service)
         let key = cacheKey(service: normalizedService, account: account)
+
+        if !useFileStorage, !isVaultAvailableInCurrentProcess {
+            guard prepareSecureStoreAccess() else { return false }
+        }
+
+        lock.lock()
+        var snapshot = tokenCache
+        snapshot.removeValue(forKey: key)
+        lock.unlock()
+
+        let ok = useFileStorage
+            ? persist(snapshot)
+            : persistSecureSnapshot(snapshot, interactive: false)
+        guard ok else { return false }
 
         lock.lock()
         tokenCache.removeValue(forKey: key)
         missingCache.insert(key)
-        let snapshot = tokenCache
         lock.unlock()
-
         removeCredentialLength(for: key)
-        if useFileStorage {
-            return persist(snapshot)
-        }
-
-        let ok = persistSecureSnapshot(snapshot, interactive: false)
-        deleteSecureStoreItem(service: normalizedService, account: account)
-        return ok
+        return true
     }
 
-    private var hasPreparedSecureStoreAccess: Bool {
-        useFileStorage || defaults.bool(forKey: Self.secureAccessPreparedDefaultsKey)
+    private var isVaultAvailableInCurrentProcess: Bool {
+        guard !useFileStorage else { return true }
+        vaultStateCondition.lock()
+        defer { vaultStateCondition.unlock() }
+        return secureVaultState == .available
     }
 
     private func markSecureStorePrepared() {
@@ -236,75 +284,11 @@ final class KeychainService: @unchecked Sendable {
         return historicalLegacyServiceNames.contains(trimmed)
     }
 
-    private func readFromVault(service: String, account: String) -> String? {
-        loadSecureVaultIfNeeded(interactive: false)
-
-        let key = cacheKey(service: service, account: account)
+    private func cachedSecureTokenIfAvailable(key: String) -> String? {
+        guard isVaultAvailableInCurrentProcess else { return nil }
         lock.lock()
         defer { lock.unlock() }
         return tokenCache[key]
-    }
-
-    private func readCurrentServiceAndMigrateIfPossible(service: String, account: String) -> String? {
-        guard service != Self.defaultServiceName || account != Self.vaultAccount,
-              let token = readFromSecureStore(service: service, account: account, interactive: false),
-              !token.isEmpty else {
-            return nil
-        }
-
-        _ = storeInVault(token: token, service: service, account: account)
-        return token
-    }
-
-    private func readLegacyServiceAndMigrateIfPossible(account: String) -> String? {
-        guard account != Self.vaultAccount else {
-            return nil
-        }
-
-        for legacyService in Self.historicalLegacyServiceNames {
-            guard let token = readFromSecureStore(service: legacyService, account: account, interactive: false),
-                  !token.isEmpty else {
-                continue
-            }
-            if storeInVault(token: token, service: Self.defaultServiceName, account: account) {
-                deleteSecureStoreItem(service: legacyService, account: account)
-            }
-            return token
-        }
-
-        return nil
-    }
-
-    private func loadSecureVaultIfNeeded(interactive: Bool) {
-        lock.lock()
-        let shouldRetryInteractive = interactive && secureVaultLoaded && tokenCache.isEmpty
-        if secureVaultLoaded && !shouldRetryInteractive {
-            lock.unlock()
-            return
-        }
-        lock.unlock()
-
-        let snapshot = readVaultSnapshotFromSecureStore(interactive: interactive)
-        if let snapshot, !snapshot.isEmpty {
-            mergeIntoCache(snapshot)
-        }
-
-        let currentItems = snapshot == nil
-            ? readCurrentServiceItemsForMigration(interactive: interactive) ?? [:]
-            : [:]
-        if !currentItems.isEmpty {
-            if !mergeIntoVault(currentItems) {
-                mergeIntoCache(currentItems)
-            }
-        }
-
-        let didLoadAccessibleState = snapshot != nil || !currentItems.isEmpty
-        lock.lock()
-        secureVaultLoaded = didLoadAccessibleState
-        lock.unlock()
-        if didLoadAccessibleState {
-            markSecureStorePrepared()
-        }
     }
 
     func prepareSecureStoreAccess() -> Bool {
@@ -312,13 +296,36 @@ final class KeychainService: @unchecked Sendable {
             return true
         }
 
-        lock.lock()
-        let alreadyPrepared = secureVaultLoaded || !tokenCache.isEmpty || hasPreparedSecureStoreAccess
-        lock.unlock()
-        guard !alreadyPrepared else {
+        vaultStateCondition.lock()
+        switch secureVaultState {
+        case .available:
+            vaultStateCondition.unlock()
             return true
+        case .loading:
+            repeat {
+                vaultStateCondition.wait()
+            } while secureVaultState == .loading
+            let available = secureVaultState == .available
+            vaultStateCondition.unlock()
+            return available
+        case .unavailable:
+            vaultStateCondition.unlock()
+            return false
+        case .locked:
+            secureVaultState = .loading
+            vaultStateCondition.unlock()
         }
 
+        let prepared = performExplicitSecureStorePreparation()
+
+        vaultStateCondition.lock()
+        secureVaultState = prepared ? .available : .unavailable
+        vaultStateCondition.broadcast()
+        vaultStateCondition.unlock()
+        return prepared
+    }
+
+    private func performExplicitSecureStorePreparation() -> Bool {
         let vaultSnapshot = readVaultSnapshotFromSecureStore(interactive: false)
             ?? readVaultSnapshotFromSecureStore(interactive: true)
         if let vaultSnapshot {
@@ -360,13 +367,7 @@ final class KeychainService: @unchecked Sendable {
     }
 
     func isSecureStoreReady() -> Bool {
-        guard !useFileStorage else {
-            return true
-        }
-        lock.lock()
-        let hasCachedCredentials = !tokenCache.isEmpty || secureVaultLoaded
-        lock.unlock()
-        return hasCachedCredentials || hasPreparedSecureStoreAccess
+        isVaultAvailableInCurrentProcess
     }
 
     func resetAllStoredCredentials() {
@@ -375,8 +376,11 @@ final class KeychainService: @unchecked Sendable {
             tokenCache.removeAll()
             missingCache.removeAll()
             credentialLengthCache = nil
-            secureVaultLoaded = false
             lock.unlock()
+            vaultStateCondition.lock()
+            secureVaultState = .locked
+            vaultStateCondition.broadcast()
+            vaultStateCondition.unlock()
             defaults.removeObject(forKey: Self.credentialLengthDefaultsKey)
             if let storageURL {
                 try? fileManager.removeItem(at: storageURL)
@@ -399,8 +403,11 @@ final class KeychainService: @unchecked Sendable {
         tokenCache.removeAll()
         missingCache.removeAll()
         credentialLengthCache = nil
-        secureVaultLoaded = false
         lock.unlock()
+        vaultStateCondition.lock()
+        secureVaultState = .locked
+        vaultStateCondition.broadcast()
+        vaultStateCondition.unlock()
     }
 
     private func readCurrentServiceItemsForMigration(interactive: Bool) -> [String: String]? {
@@ -465,24 +472,6 @@ final class KeychainService: @unchecked Sendable {
         return "\(legacyMigrationDefaultsKey).\(suffix)"
     }
 
-    private func mergeIntoVault(_ items: [String: String]) -> Bool {
-        guard !items.isEmpty else { return true }
-
-        lock.lock()
-        var merged = tokenCache
-        for (key, value) in items where !value.isEmpty {
-            merged[key] = value
-        }
-        lock.unlock()
-
-        guard persistSecureSnapshot(merged, interactive: false) else {
-            return false
-        }
-
-        mergeIntoCache(items)
-        return true
-    }
-
     private func cachedSnapshot() -> [String: String] {
         lock.lock()
         defer { lock.unlock() }
@@ -492,13 +481,8 @@ final class KeychainService: @unchecked Sendable {
     private func finishSecureStorePreparation() {
         lock.lock()
         missingCache.removeAll()
-        secureVaultLoaded = true
         lock.unlock()
         markSecureStorePrepared()
-    }
-
-    private func storeInVault(token: String, service: String, account: String) -> Bool {
-        mergeIntoVault([cacheKey(service: service, account: account): token])
     }
 
     private func mergeIntoCache(_ items: [String: String]) {
@@ -589,15 +573,6 @@ final class KeychainService: @unchecked Sendable {
         )
     }
 
-    private func readFromSecureStore(service: String, account: String, interactive: Bool) -> String? {
-        guard let data = readDataFromSecureStore(service: service, account: account, interactive: interactive),
-              let token = String(data: data, encoding: .utf8),
-              !token.isEmpty else {
-            return nil
-        }
-        return token
-    }
-
     private func readDataFromSecureStore(service: String, account: String, interactive: Bool) -> Data? {
         secureStore.readData(service, account, interactive)
     }
@@ -648,46 +623,6 @@ final class KeychainService: @unchecked Sendable {
         }
     }
 
-    private static func liveReadData(service: String, account: String, interactive: Bool) -> Data? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecUseAuthenticationContext as String: authenticationContext(interactive: interactive)
-        ]
-
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess,
-              let data = item as? Data,
-              !data.isEmpty else {
-            return nil
-        }
-        return data
-    }
-
-    private static func liveReadAll(service: String, interactive: Bool) -> [String: String]? {
-        let context = authenticationContext(interactive: interactive)
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecReturnAttributes as String: true,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitAll,
-            kSecUseAuthenticationContext as String: context
-        ]
-
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess else {
-            return nil
-        }
-
-        return tokensFromEnumeratedKeychainRows(item)
-    }
-
     static func tokensFromEnumeratedKeychainRows(_ item: CFTypeRef?) -> [String: String]? {
         let rows: [[String: Any]]
         if let array = item as? [[String: Any]] {
@@ -711,73 +646,4 @@ final class KeychainService: @unchecked Sendable {
         return result
     }
 
-    private static func liveSaveData(_ data: Data, service: String, account: String, interactive: Bool) -> Bool {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecUseAuthenticationContext as String: authenticationContext(interactive: interactive)
-        ]
-
-        let updateAttributes: [String: Any] = [
-            kSecValueData as String: data
-        ]
-
-        let updateStatus = SecItemUpdate(query as CFDictionary, updateAttributes as CFDictionary)
-        if updateStatus == errSecSuccess {
-            return true
-        }
-
-        if updateStatus != errSecItemNotFound {
-            SecItemDelete(query as CFDictionary)
-        }
-
-        let addAttributes: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
-            kSecUseAuthenticationContext as String: authenticationContext(interactive: interactive)
-        ]
-        let addStatus = SecItemAdd(addAttributes as CFDictionary, nil)
-        return addStatus == errSecSuccess
-    }
-
-    private static func liveDeleteItem(service: String, account: String) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
-        SecItemDelete(query as CFDictionary)
-    }
-
-    private static func liveDeleteAll(service: String) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service
-        ]
-        SecItemDelete(query as CFDictionary)
-    }
-
-    private static func authenticationContext(interactive: Bool) -> LAContext {
-        let context = LAContext()
-        context.interactionNotAllowed = !interactive
-        return context
-    }
-}
-
-extension KeychainService: UsageCredentialStore {
-    func credential(for providerID: UsageProviderIdentity) async throws -> String? {
-        readToken(service: Self.defaultServiceName, account: providerID.rawValue)
-    }
-
-    func saveCredential(_ credential: String, for providerID: UsageProviderIdentity) async throws {
-        _ = saveToken(credential, service: Self.defaultServiceName, account: providerID.rawValue)
-    }
-
-    func removeCredential(for providerID: UsageProviderIdentity) async throws {
-        _ = deleteToken(service: Self.defaultServiceName, account: providerID.rawValue)
-    }
 }

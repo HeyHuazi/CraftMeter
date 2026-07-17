@@ -1,5 +1,12 @@
 import Foundation
 
+/**
+ * [INPUT]: 依赖浏览器 Cookie/Storage readers 与 BrowserCredentialAccessIntent。
+ * [OUTPUT]: 对外提供受 intent 约束的 Bearer、Cookie header、named-cookie 发现和短 TTL 缓存。
+ * [POS]: Services 的统一浏览器凭据入口；background 在缓存和文件读取前立即拒绝，interactiveImport 才允许实时发现。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 struct BrowserDetectedCredential: Equatable {
     let value: String
     let source: String
@@ -52,13 +59,12 @@ final class BrowserCredentialService {
         accessIntent: BrowserCredentialAccessIntent = .interactiveImport
     ) -> [BrowserDetectedCredential] {
         let normalizedHost = normalizedHost(host)
-        guard !normalizedHost.isEmpty else { return [] }
+        guard !normalizedHost.isEmpty, accessIntent.allowsLiveLookup else { return [] }
 
         let now = now()
         if let cached = cachedBearerCandidates(for: normalizedHost, now: now) {
             return cached
         }
-        guard accessIntent.allowsLiveLookup else { return [] }
 
         let resolved: [BrowserDetectedCredential]
         if let bearerCandidatesOverride {
@@ -81,13 +87,12 @@ final class BrowserCredentialService {
         accessIntent: BrowserCredentialAccessIntent = .interactiveImport
     ) -> BrowserDetectedCredential? {
         let normalizedHost = normalizedHost(host)
-        guard !normalizedHost.isEmpty else { return nil }
+        guard !normalizedHost.isEmpty, accessIntent.allowsLiveLookup else { return nil }
 
         let now = now()
         if let cached = cachedCookieHeader(for: normalizedHost, now: now) {
             return cached
         }
-        guard accessIntent.allowsLiveLookup else { return nil }
 
         let resolved: BrowserDetectedCredential?
         if let cookieHeaderOverride {
@@ -115,10 +120,12 @@ final class BrowserCredentialService {
             } else {
                 let kimiFirstPass = detectLiveKimiCookieHeader(
                     normalizedHost: normalizedHost,
+                    accessIntent: accessIntent,
                     refreshPaths: false
                 )
                 resolved = kimiFirstPass ?? detectLiveKimiCookieHeader(
                     normalizedHost: normalizedHost,
+                    accessIntent: accessIntent,
                     refreshPaths: true
                 )
             }
@@ -135,14 +142,15 @@ final class BrowserCredentialService {
     ) -> BrowserDetectedCredential? {
         let normalizedHost = normalizedHost(host)
         let normalizedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalizedHost.isEmpty, !normalizedName.isEmpty else { return nil }
+        guard !normalizedHost.isEmpty,
+              !normalizedName.isEmpty,
+              accessIntent.allowsLiveLookup else { return nil }
 
         let cacheKey = "\(normalizedName.lowercased())|\(normalizedHost)"
         let now = now()
         if let cached = cachedNamedCookie(for: cacheKey, now: now) {
             return cached
         }
-        guard accessIntent.allowsLiveLookup else { return nil }
 
         let resolved: BrowserDetectedCredential?
         if let namedCookieOverride {
@@ -193,11 +201,13 @@ final class BrowserCredentialService {
 
     private func detectLiveKimiCookieHeader(
         normalizedHost: String,
+        accessIntent: BrowserCredentialAccessIntent,
         refreshPaths: Bool
     ) -> BrowserDetectedCredential? {
         for candidateHost in hostCandidates(for: normalizedHost) {
             if let detected = kimiCookieService.detectCookieHeader(
                 host: candidateHost,
+                accessIntent: accessIntent,
                 refreshPaths: refreshPaths
             ) {
                 return BrowserDetectedCredential(value: detected.token, source: detected.source)

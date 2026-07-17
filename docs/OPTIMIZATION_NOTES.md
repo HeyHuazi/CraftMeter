@@ -186,10 +186,10 @@
 当前收口：
 
 - 已补最小展示层 smoke suite：
-  - [PresentationSmokeTests.swift](../Tests/OhMyUsageTests/PresentationSmokeTests.swift)
+  - [PresentationSmokeTests.swift](../Tests/CraftMeterTests/PresentationSmokeTests.swift)
 - 已补设置页生命周期相关单测：
-  - [SettingsWindowAppearanceControllerTests.swift](../Tests/OhMyUsageTests/SettingsWindowAppearanceControllerTests.swift)
-  - [VisibleClockControllerTests.swift](../Tests/OhMyUsageTests/VisibleClockControllerTests.swift)
+  - [SettingsWindowAppearanceControllerTests.swift](../Tests/CraftMeterTests/SettingsWindowAppearanceControllerTests.swift)
+  - [VisibleClockControllerTests.swift](../Tests/CraftMeterTests/VisibleClockControllerTests.swift)
 - smoke 覆盖目标是“代表性展示组合不崩、不重复调度、关键文案和输入模型可生成”，不是硬 wall-clock 性能阈值。
 
 ## 建议优先级

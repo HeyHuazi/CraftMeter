@@ -1,7 +1,7 @@
 /**
  * [INPUT]: 依赖 Relay 模板、设置草稿、Provider 配置门面与连接诊断展示原语
- * [OUTPUT]: 对外提供 Relay 新增/编辑表单、浏览器连接预检、User ID 补充与验证后保存交互
- * [POS]: Settings 的 Relay 配置视图层；只渲染状态并转发动作，不读取浏览器数据库或持久化秘密
+ * [OUTPUT]: 对外提供 Relay 新增/编辑表单、浏览器连接预检、cURL 导入视图插槽与验证后保存交互
+ * [POS]: Settings 的 Relay 配置表单编排层；秘密读取与 cURL 动作委托专用文件
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
 import Foundation
@@ -342,6 +342,8 @@ extension SettingsView {
     var relayNewSiteDraftConfigPanel: some View {
         settingsConfigurationSection(title: viewModel.localizedText("配置", "Configuration")) {
             settingsConfigurationRows {
+                relayCurlImportSection
+
                 relayCompactConfigRow(title: viewModel.localizedText("用量偏好", "Usage Preference")) {
                     relayPillControl(
                         selection: OfficialQuotaDisplayMode.remaining.id,

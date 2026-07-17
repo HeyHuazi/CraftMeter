@@ -1,6 +1,13 @@
 import OhMyUsageDomain
 import Foundation
 
+/**
+ * [INPUT]: 依赖 OpenCode Go 远端接口、本地历史与 CraftMeter 已保存 Cookie。
+ * [OUTPUT]: 对外提供远端和本地 usage 快照。
+ * [POS]: Providers 的 OpenCode Go runtime；forceRefresh 不触发浏览器 Cookie 导入。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 final class OpenCodeGoProvider: UsageProvider, @unchecked Sendable {
     internal struct LocalUsageRow: Equatable {
         let createdMs: Double
@@ -348,35 +355,7 @@ final class OpenCodeGoProvider: UsageProvider, @unchecked Sendable {
             break
         }
 
-        guard forceRefresh else {
-            throw ProviderError.missingCredential("opencode.ai auth cookie")
-        }
-
-        if let named = browserCookieService.detectNamedCookie(
-            name: "auth",
-            hostContains: "opencode.ai",
-            order: nil,
-            accessIntent: .interactiveImport
-        ),
-           let header = Self.normalizedAuthCookieHeader(named.header) {
-            if let account = official.manualCookieAccount {
-                _ = keychain.saveToken(header, service: KeychainService.defaultServiceName, account: account)
-            }
-            return header
-        }
-
-        if let detected = browserCookieService.detectCookieHeader(
-            hostContains: "opencode.ai",
-            order: nil,
-            accessIntent: .interactiveImport
-        ),
-           let header = Self.normalizedAuthCookieHeader(detected.header) {
-            if let account = official.manualCookieAccount {
-                _ = keychain.saveToken(header, service: KeychainService.defaultServiceName, account: account)
-            }
-            return header
-        }
-
+        _ = forceRefresh
         throw ProviderError.missingCredential("opencode.ai auth cookie")
     }
 

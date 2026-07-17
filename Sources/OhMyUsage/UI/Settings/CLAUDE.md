@@ -25,15 +25,16 @@ SettingsOverviewView.swift: 设置工作台概览页面。
 SettingsPaneContainersView.swift: 设置详情面板的布局容器。
 SettingsPermissionAndLocalData.swift: 权限与本地数据管理分区实现。
 SettingsProfileDialogs.swift: 官方账号编辑弹窗实现。
-SettingsProviderConfigurationFacade.swift: Provider 配置能力的界面门面；透传脱敏 Relay 浏览器导入结果，不向 SwiftUI 暴露原始 Cookie/Bearer。
+SettingsProviderConfigurationFacade.swift: Provider 配置能力的界面门面；透传脱敏 Relay 浏览器/cURL 导入结果，不向 SwiftUI 暴露原始 Cookie/Bearer。
 SettingsProviderConfigurationPresentation.swift: Provider 配置的纯展示模型。
 SettingsProviderDetailPaneView.swift: Provider 详情面板路由。
 SettingsProviderDetailSections.swift: Provider 详情分区组件。
 SettingsProviderSidebar.swift: Provider 分组与账号侧边栏。
 SettingsQuotaDisplayHelpers.swift: 额度展示格式与辅助视图。
-SettingsRelayConfigurationForm.swift: Relay 配置编辑与新增表单；新增流程支持浏览器凭据预检、缺失 User ID 提示、真实连接验证，并只允许手工凭据或验证成功结果保存。
+SettingsRelayConfigurationForm.swift: Relay 配置编辑与新增表单编排；保留浏览器凭据预检与手工保存，并为专用 cURL 导入视图提供稳定插槽。
+SettingsRelayCurlImport.swift: NewAPI 高级导入交互；点击时瞬时读取剪贴板并立即交给 facade，UI 只保存进度/脱敏结果，成功后直接导航到新增 Provider。
 SettingsRelayRuntimeStatus.swift: Relay 运行状态与测试反馈展示。
-SettingsRelayTemplateSupport.swift: Relay 模板选择与预填支持；负责新增 Provider 的最终提交，并在浏览器验证后的用户确认阶段触发凭据持久化刷新。
+SettingsRelayTemplateSupport.swift: Relay 模板选择与预填支持；负责手工/浏览器新增 Provider 的最终提交，cURL 导入则由独立 App 事务在验证成功后直接完成提交。
 SettingsResetDialogView.swift: 本地数据重置确认界面。
 SettingsRootView.swift: 设置窗口根布局与覆盖层容器。
 SettingsSharedHelpers.swift: 设置界面共享辅助能力。
@@ -50,10 +51,10 @@ SettingsWindowAppearanceController.swift: 设置窗口外观控制器。
 SettingsWorkspacePresentation.swift: 设置页头与侧边栏的纯展示模型构建器。
 SettingsWorkspaceSidebarView.swift: 工作台侧边栏渲染与底部操作区。
 ThirdPartyProviderDetailCardView.swift: 第三方 Provider 详情卡片容器。
-UsageAnalyticsFacetViews.swift: typed Craft facet 的覆盖率排行展示；显式允许重叠归因，不将各项强制归一化。
-UsageAnalyticsFilterBar.swift: 历史统计的客户端、Provider、项目、模型与 typed Craft facet 组合筛选条；只绑定 filter，不承载聚合策略。
+UsageAnalyticsFacetViews.swift: Craft 活动洞察面板及纯展示模型；提供稳定维度导航、全局筛选提示、安全 Top 项摘要、Top 12 覆盖率排行和空状态，显式允许重叠归因且不对 facet 求和或归一化。
+UsageAnalyticsFilterBar.swift: 历史统计的客户端、Provider、项目、模型与 typed Craft facet 组合筛选条；以“活动类型/活动项”区分全局过滤与面板内浏览，集中提供活动类型中文展示标题，但不改变稳定 rawValue、filter 数据契约或聚合策略。
 UsageAnalyticsModelBrandPresentation.swift: 使用统计模型品牌的纯展示解析器与紧凑图标组件；优先复用 bundled 资源，Qwen 专属资源来自 MIT 许可的 Lobe Icons，遇到歧义回退通用图标。
-UsageAnalyticsSettingsView.swift: 本地历史用量统计页面编排；使用今天/本周/本月/全部自然周期，展示统一筛选口径趋势、客户端/Provider/项目/模型统计与可重叠 Craft 活动覆盖率，并区分上游报告、Models.dev 估算、部分定价下界和完全未知费用。
+UsageAnalyticsSettingsView.swift: 本地历史用量统计页面编排；使用今天/本周/本月/全部自然周期，展示统一筛选口径趋势、客户端/Provider/项目/模型统计与可重叠 Craft 活动洞察面板，并区分上游报告、Models.dev 估算、部分定价下界和完全未知费用。
 UsageAnalyticsStatisticsViews.swift: 使用统计的环形图、品牌图例与维度明细表；模型行展示 input/output/reasoning/cache、费用与定价状态，消费品牌展示元数据但不参与事实归属判断。
 
 设计边界

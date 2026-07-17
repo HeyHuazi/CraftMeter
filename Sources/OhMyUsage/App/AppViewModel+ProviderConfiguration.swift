@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖 Provider 配置协调器、Relay 预览构建器、浏览器导入协调器与运行时 ProviderFactory
- * [OUTPUT]: 对外提供 Provider 增删改、凭据保存、Relay 浏览器预检与连接诊断动作
+ * [INPUT]: 依赖 Provider 配置协调器、Relay 预览构建器、浏览器/cURL 导入协调器与运行时 ProviderFactory
+ * [OUTPUT]: 对外提供 Provider 增删改、凭据保存、Relay 浏览器预检、cURL 验证导入与连接诊断动作
  * [POS]: AppViewModel 的 Provider 配置门面扩展；保持 UI 与具体服务实现解耦
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */

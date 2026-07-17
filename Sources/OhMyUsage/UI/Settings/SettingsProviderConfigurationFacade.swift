@@ -1,6 +1,6 @@
 /**
- * [INPUT]: 依赖 AppViewModel 的 Provider 配置动作与 Relay 浏览器导入工作流结果
- * [OUTPUT]: 对外提供设置 UI 可替换、可测试的 Provider 配置闭包门面
+ * [INPUT]: 依赖 AppViewModel 的 Provider 配置动作与 Relay 浏览器/cURL 导入工作流结果
+ * [OUTPUT]: 对外提供设置 UI 可替换、可测试且仅返回脱敏信息的 Provider 配置闭包门面
  * [POS]: Settings 的动作隔离层；SwiftUI 表单不直接耦合 AppViewModel 具体实现
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -59,6 +59,15 @@ struct SettingsProviderConfigurationFacade {
                 message: ""
             ),
             diagnostic: nil
+        )
+    }
+    var importNewAPISiteFromCurlHandler: (String) async -> RelayCurlImportDisplayResult = { _ in
+        RelayCurlImportDisplayResult(
+            success: false,
+            host: nil,
+            credentialKind: nil,
+            message: "",
+            providerID: nil
         )
     }
     var updateThirdPartyQuotaDisplayModeHandler: (String, OfficialQuotaDisplayMode) -> Void = { _, _ in }
@@ -120,6 +129,15 @@ struct SettingsProviderConfigurationFacade {
                 diagnostic: nil
             )
         },
+        importNewAPISiteFromCurl: @escaping (String) async -> RelayCurlImportDisplayResult = { _ in
+            RelayCurlImportDisplayResult(
+                success: false,
+                host: nil,
+                credentialKind: nil,
+                message: "",
+                providerID: nil
+            )
+        },
         updateThirdPartyQuotaDisplayMode: @escaping (String, OfficialQuotaDisplayMode) -> Void = { _, _ in },
         removeProvider: @escaping (String) -> Void = { _ in }
     ) {
@@ -147,6 +165,7 @@ struct SettingsProviderConfigurationFacade {
         saveRelayDraftHandler = saveRelayDraft
         testRelayDraftHandler = testRelayDraft
         importRelayDraftFromBrowserHandler = importRelayDraftFromBrowser
+        importNewAPISiteFromCurlHandler = importNewAPISiteFromCurl
         updateThirdPartyQuotaDisplayModeHandler = updateThirdPartyQuotaDisplayMode
         removeProviderHandler = removeProvider
     }
@@ -185,6 +204,7 @@ struct SettingsProviderConfigurationFacade {
             saveRelayDraft: { viewModel.saveRelayDraft($0) },
             testRelayDraft: { await viewModel.testRelayDraft($0) },
             importRelayDraftFromBrowser: { await viewModel.importRelayDraftFromBrowser($0) },
+            importNewAPISiteFromCurl: { await viewModel.importNewAPISiteFromCurl($0) },
             updateThirdPartyQuotaDisplayMode: { viewModel.updateThirdPartyQuotaDisplayMode(providerID: $0, quotaDisplayMode: $1) },
             removeProvider: { viewModel.removeProvider(providerID: $0) }
         )
@@ -300,6 +320,10 @@ struct SettingsProviderConfigurationFacade {
 
     func importRelayDraftFromBrowser(_ draft: RelaySettingsDraft) async -> RelayBrowserImportResult {
         await importRelayDraftFromBrowserHandler(draft)
+    }
+
+    func importNewAPISiteFromCurl(_ command: String) async -> RelayCurlImportDisplayResult {
+        await importNewAPISiteFromCurlHandler(command)
     }
 
     func updateThirdPartyQuotaDisplayMode(

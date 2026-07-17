@@ -2,7 +2,7 @@ import SwiftUI
 
 /**
  * [INPUT]: Observes cached UsageAnalyticsSnapshot state from AppViewModel and model brand presentation metadata.
- * [OUTPUT]: Renders natural range controls, totals, token/cost trends, dimension breakdowns, typed facets, and per-model pricing states.
+ * [OUTPUT]: Renders natural range controls, totals, token/cost trends, dimension breakdowns, and the overlapping Craft activity insight panel.
  * [POS]: OhMyUsage Settings analytics feature; presentation orchestration only, with scanning and aggregation kept outside SwiftUI.
  * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
  */
@@ -28,9 +28,7 @@ struct UsageAnalyticsSettingsView: View {
                     overviewModule
                     trendModule
                     statisticsModule
-                    if !snapshot.facetStats.isEmpty {
-                        facetModule
-                    }
+                    facetModule
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 12)
@@ -223,29 +221,23 @@ struct UsageAnalyticsSettingsView: View {
     }
 
     private var facetModule: some View {
-        module(title: "Craft 活动", subtitle: "同一请求可归属多个活动项，覆盖率不会强制相加为 100%。") {
-            VStack(alignment: .leading, spacing: 12) {
-                Picker("活动维度", selection: $selectedFacetKind) {
-                    ForEach(availableFacetKinds, id: \.self) { kind in
-                        Text(kind.title).tag(kind)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-
-                UsageFacetCoverageList(items: selectedFacetItems, theme: theme)
-            }
+        module(title: "Craft 活动", subtitle: "按当前筛选范围统计；同一请求可命中多个活动，因此覆盖率可以重叠。") {
+            UsageFacetActivityPanel(
+                groups: snapshot.facetStats,
+                selectedKind: $selectedFacetKind,
+                globalFilterDescription: selectedFacetFilterDescription,
+                theme: theme
+            )
         }
     }
 
-    private var availableFacetKinds: [UsageAnalyticsFacetKind] {
-        snapshot.facetStats.map(\.kind)
-    }
-
-    private var selectedFacetItems: [UsageAnalyticsDimensionStats] {
-        let kind = availableFacetKinds.contains(selectedFacetKind) ? selectedFacetKind : availableFacetKinds.first
-        guard let kind else { return [] }
-        return snapshot.facetStats.first { $0.kind == kind }?.items ?? []
+    private var selectedFacetFilterDescription: String? {
+        guard let kind = viewModel.usageAnalyticsFilter.selectedFacetKind else { return nil }
+        guard let value = viewModel.usageAnalyticsFilter.selectedFacetValue else {
+            return kind.title
+        }
+        let title = snapshot.availableFacetValues.first { $0.id == value }?.title ?? value
+        return "\(kind.title) · \(title)"
     }
 
     private func module<Content: View>(

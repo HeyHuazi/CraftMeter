@@ -1,6 +1,13 @@
 import Foundation
 import OhMyUsageDomain
 
+/**
+ * [INPUT]: 依赖 RelayCredentialResolver、HTTP client 与 token request manifest。
+ * [OUTPUT]: 对外提供 Relay token quota 通道执行。
+ * [POS]: Providers 的 Relay token 执行器；后台只遍历 saved candidates，不做浏览器 auth recovery。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 struct TokenChannelResult {
     let remaining: Double?
     let used: Double?
@@ -27,8 +34,7 @@ struct RelayTokenChannelExecutor {
     ) async throws -> TokenChannelResult {
         let host = baseURL.host?.lowercased() ?? ""
         let credentialMode = relayConfig.balanceCredentialMode ?? .manualPreferred
-        let primaryBrowserAccessIntent: BrowserCredentialAccessIntent =
-            credentialMode == .browserOnly ? .interactiveImport : browserAccessIntent
+        let primaryBrowserAccessIntent = browserAccessIntent
         let primaryCandidates: [RelayRawTokenCandidate]
         switch credentialMode {
         case .manualPreferred:
@@ -41,15 +47,15 @@ struct RelayTokenChannelExecutor {
         case .browserPreferred:
             primaryCandidates = credentialResolver.resolveTokenCandidates(
                 host: host,
-                includeSavedCredentials: !forceRefresh,
-                includeBrowserCredentials: forceRefresh,
+                includeSavedCredentials: true,
+                includeBrowserCredentials: false,
                 browserAccessIntent: primaryBrowserAccessIntent
             )
         case .browserOnly:
             primaryCandidates = credentialResolver.resolveTokenCandidates(
                 host: host,
                 includeSavedCredentials: false,
-                includeBrowserCredentials: true,
+                includeBrowserCredentials: false,
                 browserAccessIntent: primaryBrowserAccessIntent
             )
         }
@@ -164,30 +170,6 @@ struct RelayTokenChannelExecutor {
 
         if let result = try await attempt(fallbackDeduped) {
             return result
-        }
-
-        if let trigger = recoveryPolicy.recoveryTrigger(for: lastError),
-           recoveryPolicy.relaySupportsBrowserRecovery(manifest: manifest, channel: .token),
-           await recoveryPolicy.canAttemptBrowserRecovery(
-                host: host,
-                channel: .token,
-                forceRefresh: forceRefresh
-           ) {
-            let recoveryCandidates = credentialResolver.resolveTokenCandidates(
-                host: host,
-                includeSavedCredentials: false,
-                includeBrowserCredentials: true,
-                browserAccessIntent: .authRecovery
-            ).filter { fallback in
-                !primaryCandidates.contains(where: { $0.token == fallback.token }) &&
-                !fallbackDeduped.contains(where: { $0.token == fallback.token })
-            }
-
-            if let result = try await attempt(recoveryCandidates, recoveryTrigger: trigger) {
-                await recoveryPolicy.clearBrowserRecoveryFailure(host: host, channel: .token)
-                return result
-            }
-            await recoveryPolicy.markBrowserRecoveryFailure(host: host, channel: .token)
         }
 
         guard !(primaryCandidates.isEmpty && fallbackDeduped.isEmpty) else {

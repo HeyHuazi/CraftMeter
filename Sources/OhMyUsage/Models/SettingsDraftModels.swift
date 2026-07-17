@@ -164,12 +164,15 @@ struct NewRelaySiteDraftState {
     var testStatusVisible = false
     var browserImportInFlight = false
     var browserImportResult: RelayBrowserImportResult?
+    var curlImportInFlight = false
+    var curlImportResult: RelayCurlImportDisplayResult?
     var templateID = "generic-newapi"
     var selectedPresetID: String?
 
     mutating func invalidateValidation() {
         testStatusVisible = false
         browserImportResult = nil
+        curlImportResult = nil
     }
 
     mutating func reset(using templateID: String) {
@@ -180,6 +183,8 @@ struct NewRelaySiteDraftState {
         testStatusVisible = false
         browserImportInFlight = false
         browserImportResult = nil
+        curlImportInFlight = false
+        curlImportResult = nil
         selectedPresetID = nil
         self.templateID = templateID
     }

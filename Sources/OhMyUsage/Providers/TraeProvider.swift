@@ -1,6 +1,13 @@
 import OhMyUsageDomain
 import Foundation
 
+/**
+ * [INPUT]: 依赖 Trae quota API 与 CraftMeter vault 中的 Cloud-IDE-JWT。
+ * [OUTPUT]: 对外提供 Trae quota 快照获取与解析。
+ * [POS]: Providers 的 Trae runtime；失效时提示显式重导入，不在后台发现浏览器凭据。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 final class TraeProvider: UsageProvider, @unchecked Sendable {
     private let session: URLSession
     private let keychain: KeychainService
@@ -30,36 +37,17 @@ final class TraeProvider: UsageProvider, @unchecked Sendable {
             throw ProviderError.unavailable("Trae SOLO 官方来源当前仅支持 API 检测")
         }
 
-        let allowsBrowserFallback = official.sourceMode == .auto
-        var attempted = Set<String>()
-
+        let jwt = try resolveJWT()
         do {
-            let jwt = try resolveJWT()
-            attempted.insert(jwt)
             return try await requestSnapshot(jwt: jwt)
         } catch let error as ProviderError {
-            guard allowsBrowserFallback, Self.isCredentialRefreshable(error) else {
+            guard Self.isCredentialRefreshable(error) else {
                 throw error
             }
+            throw ProviderError.unauthorizedDetail(
+                "Trae SOLO Authorization 已失效。请在设置中重新导入浏览器登录态，或粘贴最新 Cloud-IDE-JWT。"
+            )
         }
-
-        for candidate in browserJWTCandidates(excluding: attempted) {
-            attempted.insert(candidate.jwt)
-            do {
-                var snapshot = try await requestSnapshot(jwt: candidate.jwt)
-                snapshot.authSourceLabel = candidate.source
-                persistJWT(candidate.jwt)
-                return snapshot
-            } catch let error as ProviderError {
-                guard Self.isCredentialRefreshable(error) else {
-                    throw error
-                }
-            }
-        }
-
-        throw ProviderError.unauthorizedDetail(
-            "Trae SOLO Authorization 已失效，且未在浏览器中找到可用登录态。请登录 trae.ai 后重试，或重新粘贴最新 Cloud-IDE-JWT。"
-        )
     }
 
     private func resolveJWT() throws -> String {
@@ -82,32 +70,6 @@ final class TraeProvider: UsageProvider, @unchecked Sendable {
             descriptor.auth.keychainService ?? KeychainService.defaultServiceName,
             descriptor.auth.keychainAccount ?? "official/trae/cloud-ide-jwt"
         )
-    }
-
-    private func persistJWT(_ jwt: String) {
-        let normalized = Self.normalizeToken(jwt)
-        guard !normalized.isEmpty else { return }
-        let location = credentialLocation()
-        _ = keychain.saveToken(normalized, service: location.service, account: location.account)
-    }
-
-    private func browserJWTCandidates(excluding attempted: Set<String>) -> [(jwt: String, source: String)] {
-        let hosts = ["trae.ai", "api-sg-central.trae.ai"]
-        var seen = attempted
-        var output: [(jwt: String, source: String)] = []
-
-        for host in hosts {
-            for candidate in browserCredentialService.detectBearerTokenCandidates(
-                host: host,
-                accessIntent: .authRecovery
-            ) {
-                let jwt = Self.normalizeToken(candidate.value)
-                guard Self.looksLikeJWT(jwt), seen.insert(jwt).inserted else { continue }
-                output.append((jwt: jwt, source: "\(candidate.source):\(host)"))
-            }
-        }
-
-        return output
     }
 
     private func requestSnapshot(jwt: String) async throws -> UsageSnapshot {

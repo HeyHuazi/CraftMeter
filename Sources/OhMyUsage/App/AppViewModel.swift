@@ -61,6 +61,7 @@ final class AppViewModel {
     @ObservationIgnored let relayProviderSettingsCoordinator = AppRelayProviderSettingsCoordinator()
     @ObservationIgnored let relayDescriptorPreviewBuilder = RelayDescriptorPreviewBuilder()
     @ObservationIgnored let relayBrowserImportCoordinator: RelayBrowserImportCoordinator
+    @ObservationIgnored let relayCurlImportCoordinator: RelayCurlImportCoordinator
     @ObservationIgnored let statusBarPreferencesCoordinator = AppStatusBarPreferencesCoordinator()
     @ObservationIgnored let configurationMutationCoordinator = AppConfigurationMutationCoordinator()
     @ObservationIgnored let settingsPersistenceFeedbackCoordinator: AppSettingsPersistenceFeedbackCoordinator
@@ -273,6 +274,7 @@ final class AppViewModel {
             MenuBarUsageAnalyticsCoordinator()
         },
         browserCredentialService: BrowserCredentialService = BrowserCredentialService(),
+        relayCurlImportCoordinator: RelayCurlImportCoordinator = RelayCurlImportCoordinator(),
         statusBarNotificationCenter: NotificationCenter = .default,
         updateInstallBufferDelaySeconds: TimeInterval = 2,
         updateCheckStatusClearDelaySeconds: TimeInterval = 10,
@@ -290,6 +292,7 @@ final class AppViewModel {
         self.relayBrowserImportCoordinator = RelayBrowserImportCoordinator(
             browserCredentialService: browserCredentialService
         )
+        self.relayCurlImportCoordinator = relayCurlImportCoordinator
         let resolvedProviderFactory = providerFactory ?? ProviderFactory(
             keychain: keychain,
             browserCredentialService: browserCredentialService
@@ -380,6 +383,7 @@ final class AppViewModel {
             MenuBarUsageAnalyticsCoordinator()
         },
         browserCredentialService: BrowserCredentialService = BrowserCredentialService(),
+        relayCurlImportCoordinator: RelayCurlImportCoordinator = RelayCurlImportCoordinator(),
         statusBarNotificationCenter: NotificationCenter = .default,
         updateInstallBufferDelaySeconds: TimeInterval = 2,
         updateCheckStatusClearDelaySeconds: TimeInterval = 10,
@@ -397,6 +401,7 @@ final class AppViewModel {
         self.relayBrowserImportCoordinator = RelayBrowserImportCoordinator(
             browserCredentialService: browserCredentialService
         )
+        self.relayCurlImportCoordinator = relayCurlImportCoordinator
         let resolvedProviderFactory = providerFactory ?? ProviderFactory(
             keychain: keychain,
             browserCredentialService: browserCredentialService
@@ -440,7 +445,7 @@ final class AppViewModel {
 
     private static func makeTestingConfigurationRepository() -> AppConfigurationRepository {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("OhMyUsageTests", isDirectory: true)
+            .appendingPathComponent("CraftMeterTests", isDirectory: true)
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         return AppConfigurationRepository(store: ConfigStore(baseDirectoryURL: root))
     }

@@ -5,7 +5,7 @@ Swift 6.2 + SwiftUI/AppKit + SwiftPM + XCTest，macOS 14+
 
 <directory>
 Sources/ - 生产代码 (8 targets: OhMyUsage executable + Domain/Infrastructure/Providers/Application/Presentation/Features/Bootstrap)
-Tests/ - XCTest、架构依赖边界与 GEB 文档同构门禁 (1 target: OhMyUsageTests)
+Tests/ - XCTest、架构依赖边界与 GEB 文档同构门禁 (1 target: CraftMeterTests)
 docs/ - 架构、Provider、安装与发布说明
 scripts/ - CraftMeter DMG/ZIP 构建脚本
 .github/ - Swift debug/release CI 与 GitHub Preview Release 工作流

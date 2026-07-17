@@ -1,6 +1,13 @@
 import OhMyUsageDomain
 import Foundation
 
+/**
+ * [INPUT]: 依赖 Relay token/balance executors、manifest 与 CraftMeter vault。
+ * [OUTPUT]: 对外提供第三方 Relay quota 快照编排。
+ * [POS]: Providers 的 Relay 聚合根；forceRefresh 只刷新网络，浏览器凭据必须先由显式导入保存。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 final class RelayProvider: UsageProvider, @unchecked Sendable {
     let descriptor: ProviderDescriptor
     private let session: URLSession
@@ -198,7 +205,7 @@ final class RelayProvider: UsageProvider, @unchecked Sendable {
             tokenRequest: tokenRequest,
             manifest: manifest,
             forceRefresh: forceRefresh,
-            browserAccessIntent: browserAccessIntent(for: forceRefresh)
+            browserAccessIntent: .background
         )
     }
 
@@ -213,12 +220,8 @@ final class RelayProvider: UsageProvider, @unchecked Sendable {
             relayConfig: relayConfig,
             manifest: manifest,
             forceRefresh: forceRefresh,
-            browserAccessIntent: browserAccessIntent(for: forceRefresh)
+            browserAccessIntent: .background
         )
-    }
-
-    private func browserAccessIntent(for forceRefresh: Bool) -> BrowserCredentialAccessIntent {
-        forceRefresh ? .interactiveImport : .background
     }
 
 }

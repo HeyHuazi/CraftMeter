@@ -23,8 +23,7 @@ struct RelayBalanceChannelExecutor {
         let requests = RelayRequestResolver.resolveBalanceRequests(manifest: manifest, relayConfig: relayConfig)
         let credentialMode = relayConfig.balanceCredentialMode ?? .manualPreferred
         let requestForCandidates = requests.first ?? RelayRequestResolver.resolveBalanceRequest(manifest: manifest, relayConfig: relayConfig)
-        let primaryBrowserAccessIntent: BrowserCredentialAccessIntent =
-            credentialMode == .browserOnly ? .interactiveImport : browserAccessIntent
+        let primaryBrowserAccessIntent = browserAccessIntent
 
         if let requiredInputError = recoveryPolicy.relayRequiredInputError(manifest: manifest, request: requestForCandidates) {
             throw requiredInputError
@@ -51,9 +50,9 @@ struct RelayBalanceChannelExecutor {
                 relayConfig: relayConfig,
                 request: requestForCandidates,
                 strategies: manifest.authStrategies,
-                includeSavedCredentials: !forceRefresh,
-                includeBrowserCredentials: forceRefresh,
-                includeExpiredSentinel: !forceRefresh,
+                includeSavedCredentials: true,
+                includeBrowserCredentials: false,
+                includeExpiredSentinel: true,
                 browserAccessIntent: primaryBrowserAccessIntent
             )
         case .browserOnly:
@@ -64,7 +63,7 @@ struct RelayBalanceChannelExecutor {
                 request: requestForCandidates,
                 strategies: manifest.authStrategies,
                 includeSavedCredentials: false,
-                includeBrowserCredentials: true,
+                includeBrowserCredentials: false,
                 includeExpiredSentinel: false,
                 browserAccessIntent: primaryBrowserAccessIntent
             )
@@ -120,52 +119,6 @@ struct RelayBalanceChannelExecutor {
                 )
             } catch let error as ProviderError {
                 firstFailure = error
-            }
-        }
-
-        if let recordedFailure = firstFailure,
-           let trigger = recoveryPolicy.recoveryTrigger(for: recordedFailure),
-           recoveryPolicy.relaySupportsBrowserRecovery(manifest: manifest, channel: .balance),
-           await recoveryPolicy.canAttemptBrowserRecovery(
-            host: baseURL.host?.lowercased() ?? "",
-            channel: .balance,
-            forceRefresh: forceRefresh
-           ) {
-            let recoveryCandidates = credentialResolver.resolveBalanceCandidates(
-                baseURL: baseURL,
-                manifest: manifest,
-                relayConfig: relayConfig,
-                request: requestForCandidates,
-                strategies: manifest.authStrategies,
-                includeSavedCredentials: credentialMode != .browserOnly,
-                includeBrowserCredentials: true,
-                includeExpiredSentinel: false,
-                browserAccessIntent: .authRecovery
-            ).filter { fallback in
-                !primaryCandidates.contains(where: { $0.headers == fallback.headers || $0.source == fallback.source }) &&
-                !fallbackDeduped.contains(where: { $0.headers == fallback.headers || $0.source == fallback.source })
-            }
-
-            do {
-                let recovered = try await attemptBalanceFetch(
-                    candidates: recoveryCandidates,
-                    requests: requests,
-                    baseURL: baseURL,
-                    relayConfig: relayConfig,
-                    manifest: manifest,
-                    recoveryTrigger: trigger
-                )
-                await recoveryPolicy.clearBrowserRecoveryFailure(
-                    host: baseURL.host?.lowercased() ?? "",
-                    channel: .balance
-                )
-                return recovered
-            } catch let error as ProviderError {
-                firstFailure = error
-                await recoveryPolicy.markBrowserRecoveryFailure(
-                    host: baseURL.host?.lowercased() ?? "",
-                    channel: .balance
-                )
             }
         }
 

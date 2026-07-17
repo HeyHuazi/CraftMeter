@@ -1,6 +1,13 @@
 import OhMyUsageDomain
 import Foundation
 
+/**
+ * [INPUT]: 依赖 CraftMeter Keychain 中已保存 Cookie 与官方 Web overlay 策略。
+ * [OUTPUT]: 对外提供只读已保存 Cookie 的 Web quota header 解析及快照合并。
+ * [POS]: Providers 的 Web overlay 运行时；forceRefresh 不授予浏览器访问，实时导入必须走显式协调器。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 struct OfficialBrowserCookieImportStrategy {
     let providerKey: String
     let hostContains: String
@@ -12,7 +19,6 @@ struct OfficialBrowserCookieImportStrategy {
 }
 
 enum OfficialProviderWebOverlayRuntime {
-    private static let credentialCache = OfficialWebOverlayCredentialCache(ttl: 60)
 
     static func resolveCookieHeader(
         official: OfficialProviderConfig,
@@ -25,7 +31,6 @@ enum OfficialProviderWebOverlayRuntime {
         strategy: OfficialBrowserCookieImportStrategy
     ) async throws -> BrowserCookieHeader {
         let service = KeychainService.defaultServiceName
-        let browserAccessIntent: BrowserCredentialAccessIntent = forceRefresh ? .interactiveImport : .background
 
         if let account = official.manualCookieAccount,
            let stored = keychain.readToken(service: service, account: account),
@@ -42,72 +47,11 @@ enum OfficialProviderWebOverlayRuntime {
             throw ProviderError.missingCredential(strategy.autoImportMissingCredential)
         }
 
-        let backoffKey = backoffKey(
-            providerKey: strategy.providerKey,
-            descriptorID: descriptorID,
-            manualCookieAccount: official.manualCookieAccount
-        )
-        let credentialCacheKey = credentialCacheKey(
-            providerKey: strategy.providerKey,
-            descriptorID: descriptorID,
-            manualCookieAccount: official.manualCookieAccount,
-            hostContains: strategy.hostContains,
-            namedCookie: strategy.namedCookie
-        )
-        if !forceRefresh,
-           let cached = credentialCache.cachedHeader(for: credentialCacheKey) {
-            guard let cached else {
-                throw ProviderError.missingCredential(strategy.autoImportMissingCredential)
-            }
-            return cached
-        }
-
-        if let webReadBackoff {
-            guard await webReadBackoff.shouldAttempt(for: backoffKey, forceRefresh: forceRefresh) else {
-                throw ProviderError.missingCredential(strategy.autoImportMissingCredential)
-            }
-        }
-
-        if let namedCookie = strategy.namedCookie,
-           let detected = browserCookieService.detectNamedCookie(
-               name: namedCookie,
-               hostContains: strategy.hostContains,
-               order: nil,
-               accessIntent: browserAccessIntent
-           ),
-           let normalized = strategy.normalizeDetectedHeader(detected.header) {
-            if let account = official.manualCookieAccount {
-                _ = keychain.saveToken(normalized, service: service, account: account)
-            }
-            if let webReadBackoff {
-                await webReadBackoff.clearFailure(for: backoffKey)
-            }
-            let header = BrowserCookieHeader(header: normalized, source: detected.source)
-            credentialCache.store(header, for: credentialCacheKey)
-            return header
-        }
-
-        if let detected = browserCookieService.detectCookieHeader(
-            hostContains: strategy.hostContains,
-            order: nil,
-            accessIntent: browserAccessIntent
-        ),
-           let normalized = strategy.normalizeDetectedHeader(detected.header) {
-            if let account = official.manualCookieAccount {
-                _ = keychain.saveToken(normalized, service: service, account: account)
-            }
-            if let webReadBackoff {
-                await webReadBackoff.clearFailure(for: backoffKey)
-            }
-            let header = BrowserCookieHeader(header: normalized, source: detected.source)
-            credentialCache.store(header, for: credentialCacheKey)
-            return header
-        }
-
-        credentialCache.store(nil, for: credentialCacheKey)
-        if let webReadBackoff, let webRetryBackoffInterval {
-            await webReadBackoff.markFailure(for: backoffKey, interval: webRetryBackoffInterval)
-        }
+        _ = descriptorID
+        _ = browserCookieService
+        _ = webReadBackoff
+        _ = webRetryBackoffInterval
+        _ = forceRefresh
         throw ProviderError.missingCredential(strategy.autoImportMissingCredential)
     }
 
@@ -145,79 +89,4 @@ enum OfficialProviderWebOverlayRuntime {
         return merged
     }
 
-    private static func backoffKey(
-        providerKey: String,
-        descriptorID: String,
-        manualCookieAccount: String?
-    ) -> String {
-        let account = manualCookieAccount?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalized = (account?.isEmpty == false ? account! : descriptorID)
-        return "\(providerKey):\(normalized)"
-    }
-
-    private static func credentialCacheKey(
-        providerKey: String,
-        descriptorID: String,
-        manualCookieAccount: String?,
-        hostContains: String,
-        namedCookie: String?
-    ) -> String {
-        let provider = providerKey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let account = manualCookieAccount?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        let identity = account?.isEmpty == false
-            ? account!
-            : descriptorID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let host = hostContains.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let cookie = namedCookie?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased() ?? "*"
-        return "\(provider)|\(identity)|\(host)|\(cookie)"
-    }
-}
-
-private final class OfficialWebOverlayCredentialCache: @unchecked Sendable {
-    private struct Entry {
-        let header: BrowserCookieHeader?
-        let expiresAt: Date
-    }
-
-    private let ttl: TimeInterval
-    private let now: () -> Date
-    private let lock = NSLock()
-    private var entries: [String: Entry] = [:]
-
-    init(ttl: TimeInterval, now: @escaping () -> Date = Date.init) {
-        self.ttl = max(0, ttl)
-        self.now = now
-    }
-
-    func cachedHeader(for key: String) -> BrowserCookieHeader?? {
-        let currentDate = now()
-        lock.lock()
-        defer { lock.unlock() }
-        purgeExpiredLocked(now: currentDate)
-        guard let entry = entries[key] else {
-            return nil
-        }
-        return entry.header
-    }
-
-    func store(_ header: BrowserCookieHeader?, for key: String) {
-        let currentDate = now()
-        lock.lock()
-        entries[key] = Entry(
-            header: header,
-            expiresAt: currentDate.addingTimeInterval(ttl)
-        )
-        purgeExpiredLocked(now: currentDate)
-        lock.unlock()
-    }
-
-    private func purgeExpiredLocked(now: Date) {
-        entries = entries.filter { _, entry in
-            entry.expiresAt > now
-        }
-    }
 }

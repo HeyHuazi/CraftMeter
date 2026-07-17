@@ -1,6 +1,13 @@
 import OhMyUsageDomain
 import Foundation
 
+/**
+ * [INPUT]: 依赖 Claude credentials 文件/环境变量、官方 API/CLI 与 CraftMeter 已保存 Web Cookie。
+ * [OUTPUT]: 对外提供 Claude quota 快照。
+ * [POS]: Providers 的 Claude runtime；后台 OAuth 不读取 Claude 外部 Keychain，forceRefresh 不导入浏览器凭据。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 final class ClaudeProvider: UsageProvider, @unchecked Sendable {
     private static let cache = FetchedAtOfficialSnapshotCache()
     private static let gate = SerialOfficialFetchGate()
@@ -129,13 +136,6 @@ final class ClaudeProvider: UsageProvider, @unchecked Sendable {
            let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let credentials = parseClaudeCredentials(json: json, source: .file(path)) {
-            return credentials
-        }
-
-        if let raw = SecurityCredentialReader.readGenericPassword(service: "Claude Code-credentials"),
-           let data = raw.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let credentials = parseClaudeCredentials(json: json, source: .keychain) {
             return credentials
         }
 
@@ -626,7 +626,6 @@ final class ClaudeProvider: UsageProvider, @unchecked Sendable {
             rawMeta: rawMeta
         )
     }
-
     private func applyOverage(root: [String: Any], to snapshot: inout UsageSnapshot) {
         if let used = OfficialValueParser.double(root["used_credits"] ?? root["used"]),
            snapshot.extras["extraUsageCost"] == nil {
@@ -637,7 +636,6 @@ final class ClaudeProvider: UsageProvider, @unchecked Sendable {
             snapshot.extras["extraUsageLimit"] = String(format: "%.2f", limit)
         }
     }
-
     private static func buildClaudeNote(windows: [UsageQuotaWindow], extraCost: Double?, extraLimit: Double?, planHint: String?) -> String {
         var parts: [String] = []
         if let planHint {
@@ -655,7 +653,6 @@ final class ClaudeProvider: UsageProvider, @unchecked Sendable {
         }
         return parts.joined(separator: " | ")
     }
-
     private static func normalizedSevenDayWindowTitle(for key: String) -> String {
         switch key {
         case "seven_day_sonnet_only":
@@ -676,7 +673,6 @@ final class ClaudeProvider: UsageProvider, @unchecked Sendable {
             return words.joined(separator: " ")
         }
     }
-
     private func resolveClaudeExecutablePath() -> String? {
         let manager = FileManager.default
         let candidates = [
@@ -695,12 +691,10 @@ final class ClaudeProvider: UsageProvider, @unchecked Sendable {
         }
         return nil
     }
-
     private static func stripANSICodes(_ text: String) -> String {
         let pattern = #"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])"#
         return text.replacingOccurrences(of: pattern, with: "", options: .regularExpression)
     }
-
     private static func extractClaudePercent(label: String, text: String) -> Int? {
         let lines = text.components(separatedBy: .newlines)
         let target = label.lowercased()
@@ -720,7 +714,6 @@ final class ClaudeProvider: UsageProvider, @unchecked Sendable {
         }
         return nil
     }
-
     private static func extractClaudeReset(label: String, text: String) -> Date? {
         let lines = text.components(separatedBy: .newlines)
         let target = label.lowercased()
@@ -735,14 +728,12 @@ final class ClaudeProvider: UsageProvider, @unchecked Sendable {
         }
         return nil
     }
-
     private static func extractISODate(from text: String) -> String? {
         if let match = text.range(of: #"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z"#, options: .regularExpression) {
             return String(text[match])
         }
         return nil
     }
-
     private static func extractDollarValue(after label: String, text: String) -> Double? {
         guard let range = text.range(of: label) else { return nil }
         let suffix = text[range.upperBound...]
@@ -751,7 +742,6 @@ final class ClaudeProvider: UsageProvider, @unchecked Sendable {
         }
         return nil
     }
-
     private static func looksLikeMissingClaudeSubscription(text: String) -> Bool {
         let lower = text.lowercased()
         let markers = [
@@ -765,7 +755,6 @@ final class ClaudeProvider: UsageProvider, @unchecked Sendable {
         ]
         return markers.contains(where: { lower.contains($0) })
     }
-
     private static func looksLikeMissingClaudeSubscription(
         root: [String: Any],
         windows: [UsageQuotaWindow],
@@ -779,17 +768,14 @@ final class ClaudeProvider: UsageProvider, @unchecked Sendable {
         if extraCost != nil || extraLimit != nil {
             return false
         }
-
         if containsSubscriptionMarker(in: root) {
             return true
         }
-
         guard !windows.isEmpty else { return false }
         let allUnused = windows.allSatisfy { $0.usedPercent <= 0.001 && $0.remainingPercent >= 99.999 }
         let noResetDates = windows.allSatisfy { $0.resetAt == nil }
         return allUnused && noResetDates
     }
-
     private static func containsSubscriptionMarker(in value: Any) -> Bool {
         if let string = value as? String {
             return looksLikeMissingClaudeSubscription(text: string)
@@ -802,7 +788,6 @@ final class ClaudeProvider: UsageProvider, @unchecked Sendable {
         }
         return false
     }
-
     private func extractCookieValue(name: String, from header: String) -> String? {
         let parts = header.split(separator: ";")
         for part in parts {
@@ -812,24 +797,4 @@ final class ClaudeProvider: UsageProvider, @unchecked Sendable {
         }
         return nil
     }
-}
-
-private struct ClaudeCredentials {
-    var accessToken: String
-    var refreshToken: String?
-    var expiresAtMs: Double?
-    var subscriptionType: String?
-    var scopes: [String]
-    var source: ClaudeCredentialSource
-    var inferenceOnly: Bool
-
-    var accountLabel: String? {
-        nil
-    }
-}
-
-private enum ClaudeCredentialSource {
-    case file(String)
-    case keychain
-    case environment
 }

@@ -1,5 +1,12 @@
 import Foundation
 
+/**
+ * [INPUT]: 依赖 BrowserCookieDatabaseReader、BrowserStorageCredentialReader 与显式 BrowserCredentialAccessIntent。
+ * [OUTPUT]: 对外提供仅在用户交互导入意图下执行的 Kimi token 与 Cookie 检测。
+ * [POS]: Services 的 Kimi 浏览器凭据边界；后台 intent 在文件枚举或 Safe Storage 读取之前立即失败。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 struct KimiDetectedToken: Equatable {
     let token: String
     let source: String
@@ -15,7 +22,12 @@ final class KimiBrowserCookieService {
         self.storageReader = BrowserStorageCredentialReader(fileManager: fileManager)
     }
 
-    func detectKimiAuthToken(order: [KimiBrowserKind], refreshPaths: Bool = false) -> KimiDetectedToken? {
+    func detectKimiAuthToken(
+        order: [KimiBrowserKind],
+        accessIntent: BrowserCredentialAccessIntent,
+        refreshPaths: Bool = false
+    ) -> KimiDetectedToken? {
+        guard accessIntent.allowsLiveLookup else { return nil }
         for browser in order {
             if let token = tokenFromBrowser(
                 browser,
@@ -40,8 +52,10 @@ final class KimiBrowserCookieService {
     func detectCookieHeader(
         host: String,
         order: [KimiBrowserKind]? = nil,
+        accessIntent: BrowserCredentialAccessIntent,
         refreshPaths: Bool = false
     ) -> KimiDetectedToken? {
+        guard accessIntent.allowsLiveLookup else { return nil }
         let actualOrder = order ?? browserOrderDefault
         for browser in actualOrder {
             for path in cookieReader.candidateCookiePaths(for: browser, bypassCache: refreshPaths) {

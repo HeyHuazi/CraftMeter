@@ -1,5 +1,12 @@
 import Foundation
 
+/**
+ * [INPUT]: 依赖 Claude 配置目录解析与显式外部 Keychain writer。
+ * [OUTPUT]: 对外提供磁盘当前凭据读取、指纹计算和用户账户切换写事务。
+ * [POS]: Services 的 Claude Desktop 认证边界；后台同步仅读文件，显式切换才写外部 Keychain。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 enum ClaudeDesktopAuthError: LocalizedError {
     case invalidCredentials
     case noWritableCredentialPath
@@ -24,16 +31,13 @@ final class ClaudeDesktopAuthService {
     private let fileManager: FileManager
     private let homeDirectory: () -> String
     private let environment: () -> [String: String]
-    private let keychainReader: () -> String?
     private let keychainWriter: (String) -> Bool
 
     init(
         fileManager: FileManager = .default,
         homeDirectory: @escaping () -> String = { NSHomeDirectory() },
         environment: @escaping () -> [String: String] = { ProcessInfo.processInfo.environment },
-        keychainReader: @escaping () -> String? = {
-            SecurityCredentialReader.readGenericPassword(service: "Claude Code-credentials")
-        },
+        keychainReader: @escaping () -> String? = { nil },
         keychainWriter: @escaping (String) -> Bool = { value in
             SecurityCredentialReader.saveGenericPassword(service: "Claude Code-credentials", text: value)
         }
@@ -41,7 +45,7 @@ final class ClaudeDesktopAuthService {
         self.fileManager = fileManager
         self.homeDirectory = homeDirectory
         self.environment = environment
-        self.keychainReader = keychainReader
+        _ = keychainReader
         self.keychainWriter = keychainWriter
     }
 
@@ -69,7 +73,7 @@ final class ClaudeDesktopAuthService {
                 return text
             }
         }
-        return keychainReader()
+        return nil
     }
 
     func currentCredentialFingerprint() -> String? {

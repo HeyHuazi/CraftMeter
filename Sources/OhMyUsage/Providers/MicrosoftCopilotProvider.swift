@@ -1,13 +1,26 @@
 import OhMyUsageDomain
 import Foundation
 
+/**
+ * [INPUT]: 依赖 Microsoft Graph reports API、环境变量与 CraftMeter vault。
+ * [OUTPUT]: 对外提供 D7/D30 Microsoft Copilot adoption 快照。
+ * [POS]: Providers 的 Microsoft Copilot runtime；不读取历史外部 microsoft-graph-token Keychain。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 final class MicrosoftCopilotProvider: UsageProvider, @unchecked Sendable {
     private let session: URLSession
+    private let keychain: KeychainService
     let descriptor: ProviderDescriptor
 
-    init(descriptor: ProviderDescriptor, session: URLSession = .shared) {
+    init(
+        descriptor: ProviderDescriptor,
+        session: URLSession = .shared,
+        keychain: KeychainService
+    ) {
         self.descriptor = descriptor
         self.session = session
+        self.keychain = keychain
     }
 
     func fetch() async throws -> UsageSnapshot {
@@ -34,15 +47,9 @@ final class MicrosoftCopilotProvider: UsageProvider, @unchecked Sendable {
             }
         }
 
-        if let value = SecurityCredentialReader.readGenericPassword(
+        if let value = keychain.readToken(
             service: KeychainService.defaultServiceName,
             account: "official/microsoft-copilot/graph-token"
-        )?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !value.isEmpty {
-            return value
-        }
-        if let value = SecurityCredentialReader.readGenericPassword(
-            service: "microsoft-graph-token"
         )?.trimmingCharacters(in: .whitespacesAndNewlines),
            !value.isEmpty {
             return value

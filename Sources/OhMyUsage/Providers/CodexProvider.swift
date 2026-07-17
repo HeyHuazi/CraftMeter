@@ -3,6 +3,13 @@ import Foundation
 import Dispatch
 import CryptoKit
 
+/**
+ * [INPUT]: 依赖 Codex auth.json、官方 API/CLI 与 CraftMeter 已保存 Web Cookie。
+ * [OUTPUT]: 对外提供 Codex quota 快照与身份元数据。
+ * [POS]: Providers 的 Codex runtime；后台 OAuth 不读取 Codex 外部 Keychain，forceRefresh 不导入浏览器凭据。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 final class CodexProvider: UsageProvider, @unchecked Sendable {
     private static let cache = FetchedAtOfficialSnapshotCache()
     private static let gate = SerialOfficialFetchGate()
@@ -180,13 +187,6 @@ final class CodexProvider: UsageProvider, @unchecked Sendable {
                   let credentials = parseCredentials(json: json, source: .file(path)) else {
                 continue
             }
-            return credentials
-        }
-
-        if let raw = SecurityCredentialReader.readGenericPassword(service: "Codex Auth"),
-           let data = raw.data(using: .utf8),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let credentials = parseCredentials(json: json, source: .keychain) {
             return credentials
         }
 
@@ -773,30 +773,6 @@ final class CodexProvider: UsageProvider, @unchecked Sendable {
     }
 }
 
-private struct CodexCredentials {
-    var accessToken: String
-    var refreshToken: String?
-    var accountId: String?
-    var idToken: String?
-    var lastRefresh: Date?
-    var source: CodexCredentialSource
-
-    var accountLabel: String? {
-        guard let idToken else { return nil }
-        return JWTInspector.email(idToken)
-    }
-
-    var accountSubject: String? {
-        guard let idToken else { return nil }
-        return JWTInspector.subject(idToken)
-    }
-}
-
-private enum CodexCredentialSource {
-    case file(String)
-    case keychain
-}
-
 private struct CodexAccountReadResult: Decodable {
     let account: CodexAccount
 }
@@ -815,12 +791,10 @@ private struct CodexRateLimitSet: Decodable {
     let secondary: CodexRateLimitWindowPayload
     let credits: CodexCreditsPayload
 }
-
 private struct CodexRateLimitWindowPayload: Decodable {
     let usedPercent: Double
     let resetsAt: TimeInterval
 }
-
 private struct CodexCreditsPayload: Decodable {
     let balance: String
 }

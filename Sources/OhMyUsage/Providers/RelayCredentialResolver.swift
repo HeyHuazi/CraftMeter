@@ -1,6 +1,13 @@
 import Foundation
 import OhMyUsageDomain
 
+/**
+ * [INPUT]: 依赖 ProviderDescriptor、KeychainService 与 BrowserCredentialService 组合 Relay 认证候选。
+ * [OUTPUT]: 提供已保存/浏览器候选解析、凭据规范化，以及只对已解锁 CraftMeter vault 生效的后台候选持久化。
+ * [POS]: Relay Provider 的凭据编排边界；Provider fetch 不改变 Keychain 授权状态，也不把后台刷新升级为交互导入。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 struct RelayRawTokenCandidate {
     let token: String
     let source: String
@@ -225,7 +232,12 @@ struct RelayCredentialResolver {
               let account = auth.keychainAccount else {
             return false
         }
-        return keychain.saveToken(token, service: service, account: account)
+        return keychain.saveToken(
+            token,
+            service: service,
+            account: account,
+            intent: .backgroundPersistence
+        )
     }
 
     func readSavedCredential(auth: AuthConfig) -> String? {

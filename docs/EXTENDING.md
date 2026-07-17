@@ -45,7 +45,7 @@ The goal is to keep future work on the extracted seams instead of pushing logic 
 
 ### 5. Add tests
 
-- Prefer provider fixture tests beside the provider file in `Tests/OhMyUsageTests/`.
+- Prefer provider fixture tests beside the provider file in `Tests/CraftMeterTests/`.
 - Add app-state tests if the provider changes refresh/fallback/account behavior.
 - Run `swift build` and `swift test`.
 
@@ -76,7 +76,7 @@ The goal is to keep future work on the extracted seams instead of pushing logic 
 
 ### 4. Add tests
 
-- Add or update relay fixture tests in [RelayProviderTests.swift](../Tests/OhMyUsageTests/RelayProviderTests.swift).
+- Add or update relay fixture tests in [RelayProviderTests.swift](../Tests/CraftMeterTests/RelayProviderTests.swift).
 - If the manifest changes presenter output, add focused presenter tests instead of only broad end-to-end assertions.
 
 ## Add A New Settings Item
@@ -138,10 +138,10 @@ The goal is to keep future work on the extracted seams instead of pushing logic 
 
 ### 6. Add tests
 
-- Draft behavior: [SettingsDraftModelsTests.swift](../Tests/OhMyUsageTests/SettingsDraftModelsTests.swift)
+- Draft behavior: [SettingsDraftModelsTests.swift](../Tests/CraftMeterTests/SettingsDraftModelsTests.swift)
 - Quota/presenter behavior: the focused presenter test next to the extracted presenter
-- App save/feedback behavior: [AppViewModelConfigurationPersistenceTests.swift](../Tests/OhMyUsageTests/AppViewModelConfigurationPersistenceTests.swift)
-- Presentation smoke coverage: [PresentationSmokeTests.swift](../Tests/OhMyUsageTests/PresentationSmokeTests.swift)
+- App save/feedback behavior: [AppViewModelConfigurationPersistenceTests.swift](../Tests/CraftMeterTests/AppViewModelConfigurationPersistenceTests.swift)
+- Presentation smoke coverage: [PresentationSmokeTests.swift](../Tests/CraftMeterTests/PresentationSmokeTests.swift)
 
 ## Validation Checklist
 

@@ -1,6 +1,13 @@
 import Foundation
 import OhMyUsageDomain
 
+/**
+ * [INPUT]: 依赖 ProviderDescriptor 与共享 Keychain/浏览器服务依赖集合。
+ * [OUTPUT]: 对外提供覆盖全部 ProviderType 的构造注册表。
+ * [POS]: Services 的 Provider composition root；向后台 Provider 注入 CraftMeter vault，外部凭据访问不在工厂内升级。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 struct ProviderFactoryRegistry {
     struct Dependencies {
         let keychain: KeychainService
@@ -57,8 +64,11 @@ struct ProviderFactoryRegistry {
             .copilot: { descriptor, _ in
                 CopilotProvider(descriptor: descriptor)
             },
-            .microsoftCopilot: { descriptor, _ in
-                MicrosoftCopilotProvider(descriptor: descriptor)
+            .microsoftCopilot: { descriptor, dependencies in
+                MicrosoftCopilotProvider(
+                    descriptor: descriptor,
+                    keychain: dependencies.keychain
+                )
             },
             .zai: { descriptor, _ in
                 ZaiProvider(descriptor: descriptor)

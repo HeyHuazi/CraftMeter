@@ -1,6 +1,13 @@
 import OhMyUsageDomain
 import Foundation
 
+/**
+ * [INPUT]: 依赖 Kimi quota API 与 CraftMeter vault 中已保存 token。
+ * [OUTPUT]: 对外提供 Kimi Coding quota 快照解析与获取。
+ * [POS]: Providers 的 Kimi runtime；普通和强制刷新均不扫描浏览器或 Safe Storage。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 final class KimiProvider: UsageProvider, @unchecked Sendable {
     private let session: URLSession
     private let keychain: KeychainService
@@ -437,23 +444,6 @@ final class KimiProvider: UsageProvider, @unchecked Sendable {
 
         let autoAccount = "kimi.com/kimi-auth-auto"
         let cachedAuto = cachedAutoToken(service: service, account: autoAccount)
-        if !forceRefresh, let cachedAuto {
-            return cachedAuto
-        }
-
-        guard forceRefresh else {
-            throw ProviderError.missingCredential(autoAccount)
-        }
-
-        let detected = browserTokenResolverOverride?(kimiConfig.browserOrder, true)
-            ?? browserCookieService.detectKimiAuthToken(order: kimiConfig.browserOrder, refreshPaths: true)
-        if let detected,
-           !KimiJWT.isExpired(Self.normalizeToken(detected.token)) {
-            let normalized = Self.normalizeToken(detected.token)
-            _ = keychain.saveToken(normalized, service: service, account: autoAccount)
-            return (normalized, detected.source)
-        }
-
         if let cachedAuto {
             return cachedAuto
         }

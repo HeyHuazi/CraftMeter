@@ -39,7 +39,7 @@ RelayIconMetadataCatalog.swift: Relay 图标映射目录。
 RelayProviderDefaultCatalog.swift: Relay Provider 默认配置目录。
 RelaySettingsDraftSeed.swift: Relay 设置草稿初始化规则。
 RelaySnapshotDisplayMetadata.swift: Relay 快照展示元数据。
-SettingsDraftModels.swift: 设置导航、权限提示、编辑草稿与弹窗状态边界；New API 草稿只保存脱敏浏览器导入状态和验证结果。
+SettingsDraftModels.swift: 设置导航、权限提示、编辑草稿与弹窗状态边界；New API 草稿只保存脱敏浏览器/cURL 导入状态和验证结果，绝不保存原始 cURL、Cookie 或 Bearer。
 UsageSnapshotModels.swift: Relay 连接诊断、额度预览与浏览器导入工作流展示契约，禁止携带原始 Cookie/Bearer。
 
 设计边界

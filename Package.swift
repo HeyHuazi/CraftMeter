@@ -72,6 +72,7 @@ let package = Package(
                 "CLAUDE.md",
                 "App/CLAUDE.md",
                 "Models/CLAUDE.md",
+                "Providers/CLAUDE.md",
                 "Services/CLAUDE.md",
                 "UI/Settings/CLAUDE.md"
             ],
@@ -80,7 +81,7 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "OhMyUsageTests",
+            name: "CraftMeterTests",
             dependencies: [
                 "OhMyUsage",
                 "OhMyUsageDomain",

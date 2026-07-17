@@ -8,12 +8,12 @@
 - `Services/`, `Models/`, and `Utils/` for shared logic
 - `Resources/` for icons and bundled relay adapter JSON files
 
-Tests live in `Tests/OhMyUsageTests` and mirror production types, for example `CodexProvider.swift` with `CodexLocalUsageServiceTests.swift`. Supporting docs are in `docs/`, and release/packaging scripts are in `scripts/`.
+Tests live in `Tests/CraftMeterTests` and mirror production types, for example `CodexProvider.swift` with `CodexLocalUsageServiceTests.swift`. Supporting docs are in `docs/`, and release/packaging scripts are in `scripts/`.
 
 ## Build, Test, and Development Commands
 - `swift build` builds the executable target for local verification.
 - `swift run` launches the app from source on macOS 14+.
-- `swift test` runs the XCTest suite in `Tests/OhMyUsageTests`.
+- `swift test` runs the XCTest suite in `Tests/CraftMeterTests`.
 - `./scripts/package_dmg.sh` builds a distributable DMG into `dist/`.
 
 Use `VERSION` for release versioning. Packaging supports ad-hoc signing by default and Developer ID/notarization through environment variables consumed by `scripts/package_dmg.sh`.

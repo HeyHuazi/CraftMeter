@@ -1,6 +1,13 @@
 import OhMyUsageDomain
 import Foundation
 
+/**
+ * [INPUT]: 依赖 GitHub Copilot quota API 与显式环境变量 token。
+ * [OUTPUT]: 对外提供 Copilot quota 快照。
+ * [POS]: Providers 的 Copilot runtime；后台不读取 Copilot/GitHub CLI Keychain，也不执行 gh auth token。
+ * [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+ */
+
 final class CopilotProvider: UsageProvider, @unchecked Sendable {
     private struct ResolvedCredential {
         let token: String
@@ -9,29 +16,20 @@ final class CopilotProvider: UsageProvider, @unchecked Sendable {
 
     private let session: URLSession
     private let environment: () -> [String: String]
-    private let keychainReader: (String, String?) -> String?
-    private let shellRunner: (String, [String], TimeInterval) -> (status: Int32, stdout: String, stderr: String)?
     let descriptor: ProviderDescriptor
 
     init(
         descriptor: ProviderDescriptor,
         session: URLSession = .shared,
         environment: @escaping () -> [String: String] = { ProcessInfo.processInfo.environment },
-        keychainReader: @escaping (String, String?) -> String? = { service, account in
-            SecurityCredentialReader.readGenericPassword(service: service, account: account)
-        },
-        shellRunner: @escaping (String, [String], TimeInterval) -> (status: Int32, stdout: String, stderr: String)? = {
-            executable,
-            arguments,
-            timeout in
-            ShellCommand.run(executable: executable, arguments: arguments, timeout: timeout)
-        }
+        keychainReader: @escaping (String, String?) -> String? = { _, _ in nil },
+        shellRunner: @escaping (String, [String], TimeInterval) -> (status: Int32, stdout: String, stderr: String)? = { _, _, _ in nil }
     ) {
         self.descriptor = descriptor
         self.session = session
         self.environment = environment
-        self.keychainReader = keychainReader
-        self.shellRunner = shellRunner
+        _ = keychainReader
+        _ = shellRunner
     }
 
     func fetch() async throws -> UsageSnapshot {
@@ -83,22 +81,8 @@ final class CopilotProvider: UsageProvider, @unchecked Sendable {
             }
         }
 
-        if let value = Self.normalizedCredential(keychainReader("copilot-cli", nil)) {
-            return ResolvedCredential(token: value, sourceLabel: "Copilot CLI")
-        }
-
-        if let value = Self.normalizedCredential(keychainReader("gh:github.com", nil)) {
-            return ResolvedCredential(token: value, sourceLabel: "GitHub CLI")
-        }
-
-        if let result = shellRunner("/usr/bin/env", ["gh", "auth", "token"], 8),
-           result.status == 0,
-           let value = Self.normalizedCredential(result.stdout) {
-            return ResolvedCredential(token: value, sourceLabel: "GitHub CLI")
-        }
-
         throw ProviderError.missingCredential(
-            "GitHub Copilot credential (COPILOT_GITHUB_TOKEN, GH_TOKEN, GITHUB_TOKEN, Copilot CLI, or GitHub CLI)"
+            "GitHub Copilot credential (COPILOT_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN); import external CLI credentials explicitly before background refresh"
         )
     }
 
